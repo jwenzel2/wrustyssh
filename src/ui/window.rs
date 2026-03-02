@@ -76,6 +76,37 @@ pub fn build_window(app: &adw::Application, state: SharedState) -> adw::Applicat
 
     window.set_content(Some(&split_view));
 
+    // Auto-focus terminal when switching tabs.
+    // We need an idle callback because the page may not be fully mapped yet
+    // when the selected-page signal fires.
+    tab_view.connect_notify(Some("selected-page"), |tab_view, _| {
+        if let Some(page) = tab_view.selected_page() {
+            let child = page.child();
+            glib::idle_add_local_once(move || {
+                // Walk into the ScrolledWindow to find the VTE terminal
+                fn find_terminal(widget: &gtk::Widget) -> Option<vte4::Terminal> {
+                    if let Some(term) = widget.clone().downcast::<vte4::Terminal>().ok() {
+                        return Some(term);
+                    }
+                    // Check first child, then siblings
+                    if let Some(child) = widget.first_child() {
+                        let mut current = Some(child);
+                        while let Some(c) = current {
+                            if let Some(term) = find_terminal(&c) {
+                                return Some(term);
+                            }
+                            current = c.next_sibling();
+                        }
+                    }
+                    None
+                }
+                if let Some(terminal) = find_terminal(&child) {
+                    terminal.grab_focus();
+                }
+            });
+        }
+    });
+
     // Tab close handler: disconnect SSH session
     tab_view.connect_close_page(|tab_view, page| {
         terminal_tab::disconnect_tab(page);
@@ -117,7 +148,7 @@ pub fn build_window(app: &adw::Application, state: SharedState) -> adw::Applicat
         let about = adw::AboutDialog::builder()
             .application_name("GrustySSH")
             .application_icon("grustyssh")
-            .version("0.1.0")
+            .version("1.9.0")
             .developer_name("GrustySSH Project")
             .comments("A GTK4/libadwaita SSH client with tabbed terminals")
             .build();

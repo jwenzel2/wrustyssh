@@ -109,6 +109,30 @@ pub fn show_connection_dialog(
     auth_group.add(&key_row);
     content_box.append(&auth_group);
 
+    // Grey out key row when Password is selected, since it's not needed.
+    // Grey out nothing when Public Key or Both is selected (key is needed).
+    let key_row_for_auth = key_row.clone();
+    let update_auth_sensitivity = move |selected: u32| {
+        match selected {
+            0 => {
+                // Password only: disable key selection
+                key_row_for_auth.set_sensitive(false);
+            }
+            1 | 2 => {
+                // Public Key or Both: enable key selection
+                key_row_for_auth.set_sensitive(true);
+            }
+            _ => {}
+        }
+    };
+    // Set initial state
+    update_auth_sensitivity(auth_method_row.selected());
+
+    let update_fn = update_auth_sensitivity.clone();
+    auth_method_row.connect_selected_notify(move |row| {
+        update_fn(row.selected());
+    });
+
     // Tunnels group
     let tunnels_group = adw::PreferencesGroup::builder()
         .title("Tunnels")
