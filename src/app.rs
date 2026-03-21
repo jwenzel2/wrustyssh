@@ -3,8 +3,8 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::config::Settings;
-use crate::models::tunnel::TunnelConfig;
 use crate::keys::storage::KeyStore;
+use crate::models::tunnel::TunnelConfig;
 use crate::storage::profiles::ProfileStore;
 
 /// Commands sent from GTK UI thread to Tokio SSH task

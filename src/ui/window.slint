@@ -1,0 +1,1685 @@
+import { Button, LineEdit, ComboBox, SpinBox, Switch, ListView, ScrollView, VerticalBox, HorizontalBox, GridBox, TabWidget, Slider, StandardButton, Palette } from "std-widgets.slint";
+
+// ─── Data Models ───────────────────────────────────────────
+
+export struct ConnectionItem {
+    id: string,
+    name: string,
+    subtitle: string,
+    index: int,
+}
+
+export struct SftpFileItem {
+    name: string,
+    is-dir: bool,
+    size: string,
+    icon: string,
+}
+
+export struct TunnelItem {
+    id: string,
+    name: string,
+    description: string,
+    enabled: bool,
+}
+
+export struct TabItem {
+    id: string,
+    title: string,
+    is-terminal: bool,
+    index: int,
+}
+
+export struct KeyItem {
+    id: string,
+    name: string,
+    subtitle: string,
+    index: int,
+}
+
+// ─── Terminal View Component ───────────────────────────────
+
+component TerminalView inherits Rectangle {
+    in property <image> terminal-image;
+    in property <bool> cursor-visible: true;
+    in property <int> tab-index: 0;
+
+    callback key-pressed(string, bool, bool, bool, bool);
+    callback character-typed(string);
+    callback paste-requested();
+    callback copy-requested();
+    callback right-clicked();
+    callback selection-started(float, float);
+    callback selection-updated(float, float);
+    callback scroll-requested(float);
+
+    background: #0c0c0c;
+    border-radius: 20px;
+    border-width: 1px;
+    border-color: #1b2a41;
+    clip: true;
+
+    img := Image {
+        source: terminal-image;
+        x: 12px;
+        y: 12px;
+        width: root.width - 24px;
+        height: root.height - 24px;
+        image-fit: fill;
+    }
+
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+
+        key-pressed(event) => {
+            // Ignore modifier-only key presses
+            if event.text == Key.Shift || event.text == Key.ShiftR
+                || event.text == Key.Control || event.text == Key.ControlR
+                || event.text == Key.Alt || event.text == Key.AltGr
+                || event.text == Key.Meta || event.text == Key.MetaR {
+                return reject;
+            }
+            if event.modifiers.control && event.text == "c" && event.modifiers.shift {
+                root.copy-requested();
+                return accept;
+            }
+            if event.modifiers.control && event.text == "v" && event.modifiers.shift {
+                root.paste-requested();
+                return accept;
+            }
+            root.key-pressed(event.text,
+                event.modifiers.control,
+                event.modifiers.shift,
+                event.modifiers.alt,
+                event.modifiers.meta);
+            return accept;
+        }
+    }
+
+    ta := TouchArea {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        moved => {
+            if ta.pressed {
+                root.selection-updated((ta.mouse-x - 12px) / 1px, (ta.mouse-y - 12px) / 1px);
+            }
+        }
+        scroll-event(event) => {
+            root.scroll-requested(event.delta-y / 1px);
+            return accept;
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                root.right-clicked();
+            }
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                fs.focus();
+                root.selection-started((ta.mouse-x - 12px) / 1px, (ta.mouse-y - 12px) / 1px);
+            }
+        }
+    }
+
+    public function focus-terminal() {
+        fs.focus();
+    }
+}
+
+component AppButton inherits Rectangle {
+    in property <string> text: "";
+    in property <string> app-font-family: "Segoe UI";
+    in property <int> app-font-size: 13;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+
+    callback clicked();
+
+    min-height: 36px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.primary ? #4d8fd1 : #34445f;
+    background: !root.enabled ? #1b2536 :
+        (ta.pressed ? (root.primary ? #27507a : #2b3850) :
+        (ta.has-hover ? (root.primary ? #36618c : #263249) :
+        (root.primary ? #2e567f : #202b3f)));
+
+    Text {
+        x: 10px;
+        y: 0px;
+        width: root.width - 20px;
+        height: root.height;
+        text: root.text;
+        color: root.enabled ? #f4f7fb : #7f8aa0;
+        font-family: root.app-font-family;
+        font-size: root.app-font-size * 1px;
+        letter-spacing: 0.8px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-weight: root.primary ? 600 : 400;
+        wrap: word-wrap;
+        overflow: elide;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component IconButton inherits Rectangle {
+    in property <string> text: "";
+    in property <string> app-font-family: "Segoe UI Symbol";
+    in property <int> app-font-size: 14;
+    in property <bool> enabled: true;
+
+    callback clicked();
+
+    width: 24px;
+    height: 20px;
+    vertical-stretch: 0;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #34445f;
+    background: !root.enabled ? #1b2536 :
+        (ta.pressed ? #2b3850 :
+        (ta.has-hover ? #263249 : #202b3f));
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.enabled ? #f4f7fb : #7f8aa0;
+        font-family: root.app-font-family;
+        font-size: root.app-font-size * 1px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-weight: 500;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ─── SFTP Pane Component ──────────────────────────────────
+
+component SftpPane inherits VerticalBox {
+    in property <string> pane-title: "Files";
+    in property <string> current-path: "";
+    in-out property <[SftpFileItem]> file-items: [];
+    in-out property <int> selected-index: -1;
+    in property <bool> show-new-folder: true;
+    in property <string> selection-summary: "No selection";
+    in property <string> app-font-family: "Segoe UI";
+    in property <int> app-font-size: 14;
+    in property <int> button-font-size: 13;
+    in property <bool> rename-enabled: false;
+
+    callback navigate-up();
+    callback navigate-home();
+    callback navigate-to-path(string);
+    callback item-activated(int);
+    callback selection-changed(int);
+    callback refresh-requested();
+    callback new-folder-requested();
+    callback rename-requested();
+
+    padding: 8px;
+    spacing: 6px;
+
+    Rectangle {
+        border-radius: 18px;
+        border-width: 1px;
+        border-color: #31425d;
+        background: #141f31;
+
+        VerticalBox {
+            padding: 10px;
+            spacing: 6px;
+
+            HorizontalBox {
+                spacing: 8px;
+
+                VerticalBox {
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.pane-title;
+                        font-family: root.app-font-family;
+                        font-size: (root.app-font-size + 1) * 1px;
+                        font-weight: 700;
+                        color: #f5f7fb;
+                    }
+                    Text {
+                        text: root.file-items.length == 1 ? "1 item" : root.file-items.length + " items";
+                        font-family: root.app-font-family;
+                        font-size: (root.app-font-size - 2) * 1px;
+                        color: #b6c2d6;
+                    }
+                }
+
+                IconButton {
+                    text: "↑";
+                    app-font-family: "Segoe UI Symbol";
+                    app-font-size: root.button-font-size;
+                    clicked => { root.navigate-up(); }
+                }
+                IconButton {
+                    text: "⌂";
+                    app-font-family: "Segoe UI Symbol";
+                    app-font-size: root.button-font-size;
+                    clicked => { root.navigate-home(); }
+                }
+                IconButton {
+                    text: "⟳";
+                    app-font-family: "Segoe UI Symbol";
+                    app-font-size: root.button-font-size;
+                    clicked => { root.refresh-requested(); }
+                }
+            }
+
+            path-edit := LineEdit {
+                text: root.current-path;
+                min-height: 28px;
+                max-height: 28px;
+                accepted(value) => { root.navigate-to-path(value); }
+            }
+
+            HorizontalBox {
+                spacing: 6px;
+
+                if root.show-new-folder: AppButton {
+                    text: "New Folder";
+                    app-font-family: root.app-font-family;
+                    app-font-size: root.button-font-size;
+                    min-height: 30px;
+                    max-height: 30px;
+                    clicked => { root.new-folder-requested(); }
+                }
+
+                AppButton {
+                    text: "Rename";
+                    app-font-family: root.app-font-family;
+                    app-font-size: root.button-font-size;
+                    enabled: root.rename-enabled;
+                    min-height: 30px;
+                    max-height: 30px;
+                    clicked => { root.rename-requested(); }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    min-height: 30px;
+                    max-height: 30px;
+                    border-radius: 10px;
+                    background: #0f1828;
+                    border-width: 1px;
+                    border-color: #243349;
+
+                    Text {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: parent.height;
+                        text: root.selection-summary;
+                        font-family: root.app-font-family;
+                        font-size: (root.app-font-size - 2) * 1px;
+                        color: #d9e1ee;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        vertical-stretch: 1;
+        border-radius: 18px;
+        border-width: 1px;
+        border-color: #31425d;
+        background: #101827;
+        clip: true;
+
+        VerticalBox {
+                    padding: 6px;
+            spacing: 4px;
+
+                Rectangle {
+                    height: 34px;
+                border-radius: 12px;
+                background: #172235;
+
+                HorizontalLayout {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "Name";
+                        font-family: root.app-font-family;
+                        font-size: (root.app-font-size - 1) * 1px;
+                        font-weight: 600;
+                        color: #dbe4f1;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "Size";
+                        width: 104px;
+                        horizontal-alignment: right;
+                        font-family: root.app-font-family;
+                        font-size: (root.app-font-size - 1) * 1px;
+                        font-weight: 600;
+                        color: #dbe4f1;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            ListView {
+                vertical-stretch: 1;
+                for item[idx] in root.file-items: Rectangle {
+                    height: 44px;
+                    border-radius: 12px;
+                    background: idx == root.selected-index ? #20466a : (ta.has-hover ? #162338 : transparent);
+                    border-width: idx == root.selected-index ? 1px : 0px;
+                    border-color: idx == root.selected-index ? #7cc4ff : transparent;
+
+                    HorizontalLayout {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 10px;
+
+                        Text {
+                            text: item.icon;
+                            width: 22px;
+                            font-size: (root.app-font-size + 1) * 1px;
+                            color: idx == root.selected-index ? #f5f9ff : #d5deec;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: item.name;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            font-family: root.app-font-family;
+                            font-size: root.app-font-size * 1px;
+                            color: idx == root.selected-index ? #f5f9ff : #e3eaf6;
+                        }
+                        Text {
+                            text: item.size == "" ? "--" : item.size;
+                            width: 104px;
+                            horizontal-stretch: 0;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            font-family: root.app-font-family;
+                            font-size: (root.app-font-size - 1) * 1px;
+                            color: idx == root.selected-index ? #eaf3ff : #9fb0c7;
+                        }
+                    }
+
+                    ta := TouchArea {
+                        clicked => {
+                            if root.selected-index == idx {
+                                root.selected-index = -1;
+                            } else {
+                                root.selected-index = idx;
+                            }
+                            root.selection-changed(root.selected-index);
+                        }
+                        double-clicked => {
+                            root.item-activated(idx);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component InputPromptDialog inherits Dialog {
+    title: "Name";
+    preferred-width: 420px;
+    preferred-height: 220px;
+
+    in-out property <string> prompt-title: "Name";
+    in-out property <string> prompt-body: "";
+    in-out property <string> input-value: "";
+    in-out property <string> confirm-text: "Save";
+
+    callback confirm-clicked();
+    callback cancel-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: root.prompt-title; font-size: 18px; font-weight: 700; }
+        Text { text: root.prompt-body; wrap: word-wrap; color: #c1cada; }
+        LineEdit {
+            text <=> root.input-value;
+            accepted(value) => { root.confirm-clicked(); }
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Cancel"; clicked => { root.cancel-clicked(); } }
+            Button { text: root.confirm-text; primary: true; clicked => { root.confirm-clicked(); } }
+        }
+    }
+}
+
+// ─── Connection Dialog ────────────────────────────────────
+
+export component ConnectionDialog inherits Dialog {
+    title: "Connection";
+    preferred-width: 500px;
+    preferred-height: 550px;
+
+    in-out property <string> conn-name: "";
+    in-out property <string> hostname: "";
+    in-out property <int> port: 22;
+    in-out property <string> username: "";
+    in-out property <int> auth-method-index: 0;
+    in-out property <[string]> auth-methods: ["Password", "Public Key", "Both"];
+    in-out property <int> key-index: 0;
+    in-out property <[string]> key-names: ["(None)"];
+    in-out property <[TunnelItem]> tunnels: [];
+    in-out property <bool> is-edit: false;
+
+    callback save-clicked();
+    callback cancel-clicked();
+    callback add-tunnel-clicked();
+    callback remove-tunnel-clicked(int);
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: root.is-edit ? "Edit Connection" : "New Connection"; font-size: 18px; font-weight: 700; }
+
+        GridBox {
+            spacing: 8px;
+            Row {
+                Text { text: "Name:"; vertical-alignment: center; }
+                LineEdit { text <=> root.conn-name; }
+            }
+            Row {
+                Text { text: "Hostname:"; vertical-alignment: center; }
+                LineEdit { text <=> root.hostname; }
+            }
+            Row {
+                Text { text: "Port:"; vertical-alignment: center; }
+                SpinBox { value <=> root.port; minimum: 1; maximum: 65535; }
+            }
+            Row {
+                Text { text: "Username:"; vertical-alignment: center; }
+                LineEdit { text <=> root.username; }
+            }
+            Row {
+                Text { text: "Auth Method:"; vertical-alignment: center; }
+                ComboBox {
+                    model: root.auth-methods;
+                    current-index <=> root.auth-method-index;
+                }
+            }
+            Row {
+                Text { text: "SSH Key:"; vertical-alignment: center; }
+                key-combo := ComboBox {
+                    model: root.key-names;
+                    current-index <=> root.key-index;
+                    enabled: root.auth-method-index != 0;
+                }
+            }
+        }
+
+        Text { text: "Tunnels (Local Port Forward):"; font-weight: 600; }
+
+        if root.tunnels.length > 0: ListView {
+            min-height: 60px;
+            max-height: 120px;
+            for tunnel[idx] in root.tunnels: Rectangle {
+                height: 28px;
+                HorizontalLayout {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 8px;
+                    padding-right: 4px;
+                    spacing: 8px;
+                    Text { text: tunnel.name; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { text: tunnel.description; vertical-alignment: center; opacity: 0.7; }
+                    Button { text: "Del"; max-width: 40px; clicked => { root.remove-tunnel-clicked(idx); } }
+                }
+            }
+        }
+
+        Button {
+            text: "Add Tunnel...";
+            clicked => { root.add-tunnel-clicked(); }
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Cancel"; clicked => { root.cancel-clicked(); } }
+            Button { text: "Save"; primary: true; clicked => { root.save-clicked(); } }
+        }
+    }
+
+    public function apply-key-index() {
+        key-combo.current-index = root.key-index;
+    }
+}
+
+// ─── Tunnel Dialog ────────────────────────────────────────
+
+export component TunnelDialog inherits Dialog {
+    title: "Add Tunnel";
+    preferred-width: 400px;
+    preferred-height: 350px;
+
+    in-out property <string> tunnel-name: "";
+    in-out property <string> local-host: "127.0.0.1";
+    in-out property <int> local-port: 8080;
+    in-out property <string> remote-host: "127.0.0.1";
+    in-out property <int> remote-port: 80;
+    in-out property <bool> tunnel-enabled: true;
+
+    callback save-clicked();
+    callback cancel-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: "Local Port Forward"; font-size: 18px; font-weight: 700; }
+
+        GridBox {
+            spacing: 8px;
+            Row {
+                Text { text: "Name:"; vertical-alignment: center; }
+                LineEdit { text <=> root.tunnel-name; }
+            }
+            Row {
+                Text { text: "Local Host:"; vertical-alignment: center; }
+                LineEdit { text <=> root.local-host; }
+            }
+            Row {
+                Text { text: "Local Port:"; vertical-alignment: center; }
+                SpinBox { value <=> root.local-port; minimum: 1; maximum: 65535; }
+            }
+            Row {
+                Text { text: "Remote Host:"; vertical-alignment: center; }
+                LineEdit { text <=> root.remote-host; }
+            }
+            Row {
+                Text { text: "Remote Port:"; vertical-alignment: center; }
+                SpinBox { value <=> root.remote-port; minimum: 1; maximum: 65535; }
+            }
+            Row {
+                Text { text: "Enabled:"; vertical-alignment: center; }
+                Switch { checked <=> root.tunnel-enabled; }
+            }
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Cancel"; clicked => { root.cancel-clicked(); } }
+            Button { text: "Save"; primary: true; clicked => { root.save-clicked(); } }
+        }
+    }
+}
+
+// ─── Password Prompt ──────────────────────────────────────
+
+export component PasswordPrompt inherits Dialog {
+    title: "Authentication";
+    preferred-width: 400px;
+    preferred-height: 200px;
+
+    in-out property <string> prompt-heading: "Enter Password";
+    in-out property <string> prompt-body: "";
+    in-out property <string> password-value: "";
+
+    callback submit-clicked();
+    callback cancel-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: root.prompt-heading; font-size: 16px; font-weight: 700; }
+        Text { text: root.prompt-body; wrap: word-wrap; }
+        LineEdit {
+            text <=> root.password-value;
+            input-type: password;
+            accepted(value) => { root.submit-clicked(); }
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Cancel"; clicked => { root.cancel-clicked(); } }
+            Button { text: "Connect"; primary: true; clicked => { root.submit-clicked(); } }
+        }
+    }
+}
+
+export component ImportKeyDialog inherits Dialog {
+    title: "Import Existing Key";
+    preferred-width: 520px;
+    preferred-height: 280px;
+
+    in-out property <string> import-name: "";
+    in-out property <string> import-private-path: "No file selected";
+    in-out property <string> import-public-path: "No file selected";
+
+    callback import-clicked();
+    callback cancel-clicked();
+    callback browse-private-clicked();
+    callback browse-public-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: "Import Existing Key"; font-size: 18px; font-weight: 700; }
+
+        GridBox {
+            spacing: 8px;
+            Row {
+                Text { text: "Key Name:"; vertical-alignment: center; }
+                LineEdit { text <=> root.import-name; }
+            }
+            Row {
+                Text { text: "Private Key:"; vertical-alignment: center; }
+                HorizontalBox {
+                    spacing: 4px;
+                    Text {
+                        text: root.import-private-path;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        opacity: 0.7;
+                    }
+                    Button { text: "Browse..."; clicked => { root.browse-private-clicked(); } }
+                }
+            }
+            Row {
+                Text { text: "Public Key:"; vertical-alignment: center; }
+                HorizontalBox {
+                    spacing: 4px;
+                    Text {
+                        text: root.import-public-path;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        opacity: 0.7;
+                    }
+                    Button { text: "Browse..."; clicked => { root.browse-public-clicked(); } }
+                }
+            }
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Cancel"; clicked => { root.cancel-clicked(); } }
+            Button { text: "Import"; primary: true; clicked => { root.import-clicked(); } }
+        }
+    }
+}
+
+// ─── Key Manager Dialog ───────────────────────────────────
+
+export component KeyManagerDialog inherits Dialog {
+    title: "SSH Key Manager";
+    preferred-width: 720px;
+    preferred-height: 620px;
+
+    // Generate section
+    in-out property <string> gen-name: "";
+    in-out property <string> gen-passphrase: "";
+    in-out property <int> gen-algo-index: 0;
+    in-out property <[string]> gen-algorithms: ["Ed25519", "ECDSA NIST P-256", "RSA SHA2-512"];
+    // Keys list
+    in-out property <[KeyItem]> stored-keys: [];
+
+    callback generate-clicked();
+    callback open-import-clicked();
+    callback copy-public-key(int);
+    callback delete-key(int);
+    callback backup-clicked();
+    callback restore-clicked();
+    callback close-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalBox {
+            Text { text: "SSH Key Manager"; font-size: 18px; font-weight: 700; horizontal-stretch: 1; }
+            Button { text: "Import"; clicked => { root.open-import-clicked(); } }
+            Button { text: "Backup"; clicked => { root.backup-clicked(); } }
+            Button { text: "Restore"; clicked => { root.restore-clicked(); } }
+        }
+
+        // Generate section
+        Text { text: "Generate New Key"; font-weight: 600; }
+        GridBox {
+            spacing: 8px;
+            Row {
+                Text { text: "Key Name:"; vertical-alignment: center; }
+                LineEdit { text <=> root.gen-name; }
+            }
+            Row {
+                Text { text: "Passphrase:"; vertical-alignment: center; }
+                LineEdit { text <=> root.gen-passphrase; input-type: password; }
+            }
+            Row {
+                Text { text: "Algorithm:"; vertical-alignment: center; }
+                ComboBox { model: root.gen-algorithms; current-index <=> root.gen-algo-index; }
+            }
+        }
+        Button { text: "Generate Key"; primary: true; clicked => { root.generate-clicked(); } }
+
+        // Stored keys
+        Text { text: "Stored Keys"; font-weight: 600; }
+        ListView {
+            vertical-stretch: 1;
+            for key[idx] in root.stored-keys: Rectangle {
+                height: 56px;
+                HorizontalBox {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    spacing: 12px;
+
+                    VerticalBox {
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: key.name;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            text: key.subtitle;
+                            overflow: elide;
+                            opacity: 0.7;
+                        }
+                    }
+
+                    HorizontalBox {
+                        spacing: 8px;
+                        alignment: end;
+
+                        Button {
+                            text: "Copy Pub";
+                            min-width: 88px;
+                            clicked => { root.copy-public-key(idx); }
+                        }
+
+                        Button {
+                            text: "Delete";
+                            min-width: 72px;
+                            clicked => { root.delete-key(idx); }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            alignment: end;
+            Button { text: "Close"; clicked => { root.close-clicked(); } }
+        }
+    }
+}
+
+// ─── Preferences Dialog ──────────────────────────────────
+
+export component PreferencesDialog inherits Dialog {
+    title: "Preferences";
+    preferred-width: 560px;
+    preferred-height: 560px;
+
+    in-out property <string> font-family: "Cascadia Mono";
+    in-out property <int> font-size: 13;
+    in-out property <int> scrollback-lines: 10000;
+    in-out property <string> terminal-type: "xterm-256color";
+    in-out property <string> app-font-family: "Segoe UI";
+    in-out property <int> app-font-size: 14;
+    in-out property <int> button-font-size: 13;
+    in-out property <int> connection-name-font-size: 16;
+    in-out property <int> connection-subtitle-font-size: 10;
+    in-out property <int> font-family-index: 0;
+    in-out property <int> app-font-family-index: 0;
+    in-out property <int> terminal-palette-index: 0;
+    in-out property <[string]> terminal-palettes: ["Campbell"];
+    in-out property <[string]> font-options: ["Segoe UI", "Cascadia Mono"];
+
+    callback save-clicked();
+    callback cancel-clicked();
+    callback restore-defaults-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: "App Settings"; font-size: 18px; font-weight: 700; }
+
+        GridBox {
+            spacing: 8px;
+            Row {
+                Text { text: "App Font Family:"; vertical-alignment: center; }
+                ComboBox {
+                    model: root.font-options;
+                    current-index <=> root.app-font-family-index;
+                    selected(value) => { root.app-font-family = value; }
+                }
+            }
+            Row {
+                Text { text: "App Base Size:"; vertical-alignment: center; }
+                SpinBox { value <=> root.app-font-size; minimum: 8; maximum: 36; }
+            }
+            Row {
+                Text { text: "Button Size:"; vertical-alignment: center; }
+                SpinBox { value <=> root.button-font-size; minimum: 8; maximum: 36; }
+            }
+            Row {
+                Text { text: "Connection Name Size:"; vertical-alignment: center; }
+                SpinBox { value <=> root.connection-name-font-size; minimum: 8; maximum: 36; }
+            }
+            Row {
+                Text { text: "Connection Subtitle Size:"; vertical-alignment: center; }
+                SpinBox { value <=> root.connection-subtitle-font-size; minimum: 8; maximum: 24; }
+            }
+        }
+
+        Text { text: "Terminal Settings"; font-size: 18px; font-weight: 700; }
+
+        GridBox {
+            spacing: 8px;
+            Row {
+                Text { text: "Font Family:"; vertical-alignment: center; }
+                ComboBox {
+                    model: root.font-options;
+                    current-index <=> root.font-family-index;
+                    selected(value) => { root.font-family = value; }
+                }
+            }
+            Row {
+                Text { text: "Font Size:"; vertical-alignment: center; }
+                SpinBox { value <=> root.font-size; minimum: 6; maximum: 72; }
+            }
+            Row {
+                Text { text: "Scrollback Lines:"; vertical-alignment: center; }
+                SpinBox { value <=> root.scrollback-lines; minimum: 100; maximum: 100000; }
+            }
+            Row {
+                Text { text: "Terminal Type:"; vertical-alignment: center; }
+                LineEdit { text <=> root.terminal-type; }
+            }
+            Row {
+                Text { text: "Color Palette:"; vertical-alignment: center; }
+                ComboBox {
+                    model: root.terminal-palettes;
+                    current-index <=> root.terminal-palette-index;
+                }
+            }
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Restore Defaults"; clicked => { root.restore-defaults-clicked(); } }
+            Button { text: "Cancel"; clicked => { root.cancel-clicked(); } }
+            Button { text: "Save"; primary: true; clicked => { root.save-clicked(); } }
+        }
+    }
+}
+
+// ─── Conflict Dialog ─────────────────────────────────────
+
+export component ConflictDialog inherits Dialog {
+    title: "File Conflict";
+    preferred-width: 450px;
+    preferred-height: 250px;
+
+    in-out property <string> conflict-path: "";
+    in-out property <string> conflict-direction: "Upload";
+    in-out property <bool> apply-to-all: false;
+
+    callback keep-existing();
+    callback replace-incoming();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text {
+            text: root.conflict-direction == "Upload" ? "Upload Conflict" : "Download Conflict";
+            font-size: 16px;
+            font-weight: 700;
+        }
+        Text {
+            text: root.conflict-path + "\nalready exists at the destination.";
+            wrap: word-wrap;
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+            Text { text: "Apply to all files:"; vertical-alignment: center; }
+            Switch { checked <=> root.apply-to-all; }
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button {
+                text: root.conflict-direction == "Upload" ? "Keep Remote" : "Keep Local";
+                clicked => { root.keep-existing(); }
+            }
+            Rectangle {
+                width: replace-btn.preferred-width + 24px;
+                height: replace-btn.preferred-height + 8px;
+                border-radius: 4px;
+                background: #cc3333;
+
+                replace-btn := Text {
+                    text: root.conflict-direction == "Upload" ? "Replace Remote" : "Replace Local";
+                    color: #ffffff;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea {
+                    clicked => { root.replace-incoming(); }
+                }
+            }
+        }
+    }
+}
+
+// ─── Alert Dialog ────────────────────────────────────────
+
+export component AlertDialog inherits Dialog {
+    title: "Alert";
+    preferred-width: 400px;
+    preferred-height: 180px;
+
+    in-out property <string> alert-heading: "";
+    in-out property <string> alert-body: "";
+
+    callback ok-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: root.alert-heading; font-size: 16px; font-weight: 700; }
+        Text { text: root.alert-body; wrap: word-wrap; }
+        VerticalLayout { vertical-stretch: 1; }
+        HorizontalBox {
+            alignment: end;
+            Button { text: "OK"; primary: true; clicked => { root.ok-clicked(); } }
+        }
+    }
+}
+
+// ─── New Folder Dialog ───────────────────────────────────
+
+export component NewFolderDialog inherits Dialog {
+    title: "New Folder";
+    preferred-width: 350px;
+    preferred-height: 170px;
+
+    in-out property <string> folder-name: "";
+
+    callback create-clicked();
+    callback cancel-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: "Create New Folder"; font-size: 16px; font-weight: 700; }
+        LineEdit {
+            text <=> root.folder-name;
+            placeholder-text: "Folder name";
+            accepted(value) => { root.create-clicked(); }
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Cancel"; clicked => { root.cancel-clicked(); } }
+            Button { text: "Create"; primary: true; clicked => { root.create-clicked(); } }
+        }
+    }
+}
+
+// ─── Main Window ─────────────────────────────────────────
+
+export component MainWindow inherits Window {
+    title: "GrustySSH";
+    icon: @image-url("../../grusty.png");
+    preferred-width: 1400px;
+    preferred-height: 900px;
+    background: #0b1220;
+    default-font-family: root.app-font-family;
+    // No min/max constraints — allow free resizing
+
+    in property <brush> chrome-bg: #0b1220;
+    in property <brush> surface-bg: #111827;
+    in property <brush> sidebar-bg: #0f172a;
+    in property <brush> card-bg: #1a2438;
+    in property <brush> card-hover-bg: #22304a;
+    in property <brush> border-soft: #33445f;
+    in property <brush> accent-strong: #7cc4ff;
+    in property <brush> accent-soft: #16395b;
+    in property <brush> text-strong: #f5f7fb;
+    in property <brush> text-muted: #c1cada;
+    in-out property <string> app-font-family: "Segoe UI";
+    in-out property <int> app-font-size: 14;
+    in-out property <int> button-font-size: 13;
+    in-out property <int> connection-name-font-size: 16;
+    in-out property <int> connection-subtitle-font-size: 10;
+    out property <length> tab-header-height: root.tabs.length > 0 ? 56px : 0px;
+
+    // ── Connection List Properties ──
+    in-out property <[ConnectionItem]> connections: [];
+    in-out property <string> connection-search: "";
+
+    // ── Tab Properties ──
+    in-out property <[TabItem]> tabs: [];
+    in-out property <int> active-tab-index: 0;
+
+    // ── Terminal Properties (one per tab, indexed by active tab) ──
+    in-out property <image> terminal-image;
+    in-out property <bool> terminal-cursor-visible: true;
+
+    // ── SFTP Properties ──
+    in-out property <string> sftp-status: "";
+    in-out property <string> sftp-transfer-status: "";
+    in-out property <string> sftp-local-path: "";
+    in-out property <string> sftp-remote-path: "";
+    in-out property <[SftpFileItem]> sftp-local-files: [];
+    in-out property <[SftpFileItem]> sftp-remote-files: [];
+    in-out property <int> sftp-local-selected: -1;
+    in-out property <int> sftp-remote-selected: -1;
+    in-out property <bool> sftp-connected: false;
+    in-out property <string> sftp-local-summary: "No selection";
+    in-out property <string> sftp-remote-summary: "No selection";
+
+    // ── Terminal size (derived from content area actual dimensions) ──
+    out property <float> scale-factor: 1.0;
+    out property <int> content-area-width: Math.max(100, Math.round((content-area.width - 24px) / 1px));
+    out property <int> content-area-height: Math.max(100, Math.round((content-area.height - root.tab-header-height - 24px) / 1px));
+
+    // ── Visibility flags ──
+    in-out property <bool> show-terminal: true;
+
+    // ── Callbacks ──
+    // Sidebar
+    callback add-connection-clicked();
+    callback connect-clicked(int);
+    callback sftp-clicked(int);
+    callback edit-clicked(int);
+    callback delete-clicked(int);
+    callback key-manager-clicked();
+    callback preferences-clicked();
+    callback backup-connections-clicked();
+    callback restore-connections-clicked();
+    callback connection-search-edited(string);
+
+    // Tabs
+    callback tab-selected(int);
+    callback tab-close(int);
+
+    // Terminal
+    callback terminal-key-pressed(string, bool, bool, bool, bool);
+    callback terminal-character-typed(string);
+    callback terminal-paste-requested();
+    callback terminal-copy-requested();
+    callback terminal-right-clicked();
+    callback terminal-selection-started(float, float);
+    callback terminal-selection-updated(float, float);
+    callback terminal-scroll-requested(float);
+    callback terminal-focus-requested();
+
+    // SFTP
+    callback sftp-local-navigate-up();
+    callback sftp-local-navigate-home();
+    callback sftp-local-navigate-to(string);
+    callback sftp-local-item-activated(int);
+    callback sftp-local-selection-changed(int);
+    callback sftp-local-refresh();
+    callback sftp-local-new-folder();
+    callback sftp-local-rename();
+    callback sftp-remote-navigate-up();
+    callback sftp-remote-navigate-home();
+    callback sftp-remote-navigate-to(string);
+    callback sftp-remote-item-activated(int);
+    callback sftp-remote-selection-changed(int);
+    callback sftp-remote-refresh();
+    callback sftp-remote-new-folder();
+    callback sftp-remote-rename();
+    callback sftp-upload-clicked();
+    callback sftp-download-clicked();
+    callback sftp-delete-local-clicked();
+    callback sftp-delete-remote-clicked();
+
+    HorizontalBox {
+        padding: 14px;
+        spacing: 14px;
+
+        // ── Sidebar ──
+        sidebar := Rectangle {
+            min-width: 336px;
+            max-width: 364px;
+            horizontal-stretch: 0;
+            background: root.sidebar-bg;
+            border-radius: 28px;
+            border-width: 1px;
+            border-color: root.border-soft;
+            clip: true;
+
+            VerticalBox {
+                padding: 14px;
+                padding-bottom: 16px;
+                spacing: 10px;
+
+                // Header
+                HorizontalBox {
+                    spacing: 6px;
+                    Text {
+                        text: "Connections";
+                        font-family: root.app-font-family;
+                        font-size: (root.app-font-size + 8) * 1px;
+                        letter-spacing: 0.3px;
+                        font-weight: 700;
+                        color: root.text-strong;
+                        vertical-alignment: center;
+                    }
+                    add-connection-btn := Rectangle {
+                        width: 18px;
+                        height: 18px;
+                        vertical-stretch: 0;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #34445f;
+                        background: add-connection-touch.pressed ? #2b3850 :
+                            (add-connection-touch.has-hover ? #263249 : #202b3f);
+
+                        Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: "+";
+                            color: root.text-strong;
+                            font-family: "Segoe UI Symbol";
+                            font-size: (root.button-font-size - 1) * 1px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        add-connection-touch := TouchArea {
+                            clicked => { root.add-connection-clicked(); }
+                        }
+                    }
+                    VerticalLayout { horizontal-stretch: 1; }
+                }
+                LineEdit {
+                    text <=> root.connection-search;
+                    placeholder-text: "Search connections";
+                    min-height: 30px;
+                    max-height: 30px;
+                    edited(value) => { root.connection-search-edited(value); }
+                }
+
+                // Connection list
+                ListView {
+                    vertical-stretch: 1;
+                    for conn[idx] in root.connections: Rectangle {
+                        height: 124px;
+                        border-radius: 18px;
+                        border-width: 1px;
+                        border-color: ta-conn.has-hover ? root.accent-soft : root.border-soft;
+                        background: ta-conn.has-hover ? root.card-hover-bg : root.card-bg;
+
+                        ta-conn := TouchArea {}
+
+                        VerticalBox {
+                            padding: 12px;
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            spacing: 8px;
+
+                            Text {
+                                text: conn.name;
+                                font-family: root.app-font-family;
+                                font-weight: 600;
+                                font-size: root.connection-name-font-size * 1px;
+                                letter-spacing: 0.3px;
+                                color: root.text-strong;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: conn.subtitle;
+                                font-family: root.app-font-family;
+                                font-size: root.connection-subtitle-font-size * 1px;
+                                letter-spacing: 0.3px;
+                                color: root.text-muted;
+                                overflow: elide;
+                            }
+                            VerticalLayout { vertical-stretch: 1; }
+                            HorizontalBox {
+                                spacing: 4px;
+                                AppButton {
+                                    text: "SSH";
+                                    app-font-family: root.app-font-family;
+                                    app-font-size: root.button-font-size;
+                                    horizontal-stretch: 1;
+                                    max-height: 28px;
+                                    clicked => { root.connect-clicked(idx); }
+                                }
+                                AppButton {
+                                    text: "SFTP";
+                                    app-font-family: root.app-font-family;
+                                    app-font-size: root.button-font-size;
+                                    horizontal-stretch: 1;
+                                    max-height: 28px;
+                                    clicked => { root.sftp-clicked(idx); }
+                                }
+                                AppButton {
+                                    text: "Edit";
+                                    app-font-family: root.app-font-family;
+                                    app-font-size: root.button-font-size;
+                                    horizontal-stretch: 1;
+                                    max-height: 28px;
+                                    clicked => { root.edit-clicked(idx); }
+                                }
+                                AppButton {
+                                    text: "Del";
+                                    app-font-family: root.app-font-family;
+                                    app-font-size: root.button-font-size;
+                                    horizontal-stretch: 1;
+                                    max-height: 28px;
+                                    clicked => { root.delete-clicked(idx); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom buttons
+                VerticalBox {
+                    vertical-stretch: 0;
+                    min-height: 132px;
+                    spacing: 6px;
+                    HorizontalBox {
+                        spacing: 4px;
+                        AppButton {
+                            app-font-family: root.app-font-family;
+                            app-font-size: root.button-font-size;
+                            text: "Key Manager";
+                            horizontal-stretch: 1;
+                            clicked => { root.key-manager-clicked(); }
+                        }
+                        AppButton {
+                            app-font-family: root.app-font-family;
+                            app-font-size: root.button-font-size;
+                            text: "Preferences";
+                            horizontal-stretch: 1;
+                            clicked => { root.preferences-clicked(); }
+                        }
+                    }
+                    VerticalBox {
+                        spacing: 6px;
+                        AppButton {
+                            app-font-family: root.app-font-family;
+                            app-font-size: root.button-font-size;
+                            text: "Backup Connections";
+                            clicked => { root.backup-connections-clicked(); }
+                        }
+                        AppButton {
+                            app-font-family: root.app-font-family;
+                            app-font-size: root.button-font-size;
+                            text: "Restore Connections";
+                            clicked => { root.restore-connections-clicked(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Content Area ──
+        content-area := Rectangle {
+            horizontal-stretch: 1;
+            background: root.surface-bg;
+            border-radius: 28px;
+            border-width: 1px;
+            border-color: root.border-soft;
+            clip: true;
+
+            // Tab bar - scrollable so tabs don't force the window wider
+            if root.tabs.length > 0: Flickable {
+                x: 0;
+                y: 0;
+                width: content-area.width;
+                height: root.tab-header-height;
+                viewport-width: root.tabs.length * 172px;
+                viewport-height: root.tab-header-height;
+
+                HorizontalBox {
+                    padding: 10px;
+                    spacing: 6px;
+                    height: root.tab-header-height;
+
+                    for tab[idx] in root.tabs: Rectangle {
+                        height: 36px;
+                        width: 168px;
+                        border-radius: 16px;
+                        border-width: 1px;
+                        border-color: idx == root.active-tab-index ? root.accent-strong : root.border-soft;
+                        background: idx == root.active-tab-index ? root.accent-soft : (ta-tab.has-hover ? root.card-hover-bg : root.card-bg);
+
+                        ta-tab := TouchArea {
+                            clicked => {
+                                root.active-tab-index = idx;
+                                root.tab-selected(idx);
+                            }
+                        }
+
+                        HorizontalBox {
+                            padding-left: 8px;
+                            padding-right: 4px;
+                            Text {
+                                text: tab.title;
+                                font-family: root.app-font-family;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                color: idx == root.active-tab-index ? root.accent-strong : root.text-strong;
+                                font-size: root.button-font-size * 1px;
+                                letter-spacing: 0.3px;
+                                font-weight: idx == root.active-tab-index ? 600 : 500;
+                            }
+                            close-btn := Rectangle {
+                                width: 20px;
+                                height: 20px;
+                                border-radius: 10px;
+                                background: ta-close.has-hover ? #e7edf6 : transparent;
+
+                                ta-close := TouchArea {
+                                    clicked => {
+                                        root.tab-close(idx);
+                                    }
+                                }
+                                Text {
+                                    text: "x";
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    font-size: 12px;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Content: Terminal or SFTP
+            if root.tabs.length == 0: VerticalBox {
+                x: 0;
+                y: 0;
+                width: content-area.width;
+                height: content-area.height;
+                alignment: center;
+                Text {
+                    text: "No active sessions";
+                    font-family: root.app-font-family;
+                    font-size: (root.app-font-size + 6) * 1px;
+                    letter-spacing: 0.3px;
+                    color: root.text-strong;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Select a connection from the sidebar to get started.";
+                    font-family: root.app-font-family;
+                    font-size: root.app-font-size * 1px;
+                    letter-spacing: 0.3px;
+                    color: root.text-muted;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if root.tabs.length > 0 && root.show-terminal: terminal-view := TerminalView {
+                x: 12px;
+                y: root.tab-header-height + 12px;
+                width: content-area.width - 24px;
+                height: content-area.height - root.tab-header-height - 24px;
+                terminal-image: root.terminal-image;
+                cursor-visible: root.terminal-cursor-visible;
+
+                key-pressed(text, ctrl, shift, alt, meta) => {
+                    root.terminal-key-pressed(text, ctrl, shift, alt, meta);
+                }
+                character-typed(ch) => {
+                    root.terminal-character-typed(ch);
+                }
+                paste-requested => {
+                    root.terminal-paste-requested();
+                }
+                copy-requested => {
+                    root.terminal-copy-requested();
+                }
+                right-clicked => {
+                    root.terminal-right-clicked();
+                }
+                selection-started(x, y) => {
+                    root.terminal-selection-started(x, y);
+                }
+                selection-updated(x, y) => {
+                    root.terminal-selection-updated(x, y);
+                }
+                scroll-requested(delta-y) => {
+                    root.terminal-scroll-requested(delta-y);
+                }
+            }
+
+            if root.tabs.length > 0 && !root.show-terminal: VerticalBox {
+                x: 12px;
+                y: root.tab-header-height + 12px;
+                width: content-area.width - 24px;
+                height: content-area.height - root.tab-header-height - 24px;
+
+                Rectangle {
+                    border-radius: 18px;
+                    border-width: 1px;
+                    border-color: root.border-soft;
+                    background: root.card-bg;
+
+                    VerticalBox {
+                        padding: 12px;
+                        spacing: 4px;
+
+                        HorizontalBox {
+                            spacing: 12px;
+
+                            VerticalBox {
+                                horizontal-stretch: 1;
+                                Text {
+                                    text: "File Transfers";
+                                    font-family: root.app-font-family;
+                                    font-size: (root.app-font-size + 3) * 1px;
+                                    font-weight: 700;
+                                    color: root.text-strong;
+                                }
+                                Text {
+                                    text: root.sftp-status;
+                                    font-family: root.app-font-family;
+                                    font-size: (root.app-font-size - 2) * 1px;
+                                    color: root.text-muted;
+                                }
+                            }
+
+                            Rectangle {
+                                width: 236px;
+                                height: 20px;
+                                vertical-stretch: 0;
+                                border-radius: 12px;
+                                border-width: 1px;
+                                border-color: root.border-soft;
+                                background: #0f1828;
+
+                                Text {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    height: parent.height;
+                                    text: root.sftp-transfer-status == "" ? "Ready for transfers" : root.sftp-transfer-status;
+                                    font-family: root.app-font-family;
+                                    font-size: (root.app-font-size - 3) * 1px;
+                                    color: root.text-strong;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+
+                        HorizontalBox {
+                            spacing: 6px;
+
+                            AppButton {
+                                text: "Upload to Remote";
+                                app-font-family: root.app-font-family;
+                                app-font-size: root.button-font-size;
+                                enabled: root.sftp-connected && root.sftp-local-selected >= 0;
+                                min-height: 28px;
+                                max-height: 28px;
+                                clicked => { root.sftp-upload-clicked(); }
+                            }
+                            AppButton {
+                                text: "Download to Local";
+                                app-font-family: root.app-font-family;
+                                app-font-size: root.button-font-size;
+                                enabled: root.sftp-connected && root.sftp-remote-selected >= 0;
+                                min-height: 28px;
+                                max-height: 28px;
+                                clicked => { root.sftp-download-clicked(); }
+                            }
+                            AppButton {
+                                text: "Delete Local";
+                                app-font-family: root.app-font-family;
+                                app-font-size: root.button-font-size;
+                                enabled: root.sftp-local-selected >= 0;
+                                min-height: 28px;
+                                max-height: 28px;
+                                clicked => { root.sftp-delete-local-clicked(); }
+                            }
+                            AppButton {
+                                text: "Delete Remote";
+                                app-font-family: root.app-font-family;
+                                app-font-size: root.button-font-size;
+                                enabled: root.sftp-connected && root.sftp-remote-selected >= 0;
+                                min-height: 28px;
+                                max-height: 28px;
+                                clicked => { root.sftp-delete-remote-clicked(); }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalBox {
+                    vertical-stretch: 1;
+                    spacing: 8px;
+
+                    SftpPane {
+                        horizontal-stretch: 1;
+                        pane-title: "Local";
+                        current-path: root.sftp-local-path;
+                        file-items: root.sftp-local-files;
+                        selected-index <=> root.sftp-local-selected;
+                        show-new-folder: true;
+                        selection-summary: root.sftp-local-summary;
+                        app-font-family: root.app-font-family;
+                        app-font-size: root.app-font-size;
+                        button-font-size: root.button-font-size;
+                        rename-enabled: root.sftp-local-selected >= 0;
+
+                        navigate-up => { root.sftp-local-navigate-up(); }
+                        navigate-home => { root.sftp-local-navigate-home(); }
+                        navigate-to-path(p) => { root.sftp-local-navigate-to(p); }
+                        item-activated(idx) => { root.sftp-local-item-activated(idx); }
+                        selection-changed(idx) => { root.sftp-local-selection-changed(idx); }
+                        refresh-requested => { root.sftp-local-refresh(); }
+                        new-folder-requested => { root.sftp-local-new-folder(); }
+                        rename-requested => { root.sftp-local-rename(); }
+                    }
+
+                    SftpPane {
+                        horizontal-stretch: 1;
+                        pane-title: "Remote";
+                        current-path: root.sftp-remote-path;
+                        file-items: root.sftp-remote-files;
+                        selected-index <=> root.sftp-remote-selected;
+                        show-new-folder: true;
+                        selection-summary: root.sftp-remote-summary;
+                        app-font-family: root.app-font-family;
+                        app-font-size: root.app-font-size;
+                        button-font-size: root.button-font-size;
+                        rename-enabled: root.sftp-connected && root.sftp-remote-selected >= 0;
+
+                        navigate-up => { root.sftp-remote-navigate-up(); }
+                        navigate-home => { root.sftp-remote-navigate-home(); }
+                        navigate-to-path(p) => { root.sftp-remote-navigate-to(p); }
+                        item-activated(idx) => { root.sftp-remote-item-activated(idx); }
+                        selection-changed(idx) => { root.sftp-remote-selection-changed(idx); }
+                        refresh-requested => { root.sftp-remote-refresh(); }
+                        new-folder-requested => { root.sftp-remote-new-folder(); }
+                        rename-requested => { root.sftp-remote-rename(); }
+                    }
+                }
+            }
+        }
+    }
+
+    public function focus-terminal() {
+        root.terminal-focus-requested();
+    }
+}

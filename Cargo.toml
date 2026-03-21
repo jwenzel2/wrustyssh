@@ -1,14 +1,28 @@
 [package]
 name = "grustyssh"
-version = "1.9.0"
+version = "3.1.0"
 edition = "2021"
-description = "A GTK4/libadwaita SSH client with tabbed terminals"
+authors = ["Jeremiah Wenzel"]
+description = "A Slint-based SSH client with tabbed terminals"
+
+[package.metadata.wix]
+eula = false
 
 [dependencies]
 # GUI
-gtk4 = { version = "0.10", features = ["v4_14"] }
-libadwaita = { version = "0.8", features = ["v1_6"] }
-vte4 = "0.9"
+slint = "1"
+
+# Terminal emulation
+vt100 = "0.15"
+
+# Font rendering for terminal
+fontdue = "0.9"
+
+# Native file dialogs
+rfd = "0.15"
+
+# Clipboard
+arboard = "3"
 
 # SSH
 russh = "0.46"
@@ -34,3 +48,10 @@ thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
 rand = "0.8"
+
+# Pin windows-sys to avoid dlltool requirement on GNU toolchain
+windows-sys = "0.52"
+
+[build-dependencies]
+slint-build = "1"
+embed-resource = "3"

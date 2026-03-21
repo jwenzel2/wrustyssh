@@ -41,9 +41,18 @@ pub struct SftpConflictResponse {
 #[derive(Debug, Clone)]
 pub enum SftpEvent {
     Connected,
-    DirListing { path: String, entries: Vec<SftpEntry> },
-    TransferProgress { name: String, bytes: u64, total: u64 },
-    TransferComplete { name: String },
+    DirListing {
+        path: String,
+        entries: Vec<SftpEntry>,
+    },
+    TransferProgress {
+        name: String,
+        bytes: u64,
+        total: u64,
+    },
+    TransferComplete {
+        name: String,
+    },
     TransferConflict {
         path: String,
         direction: SftpConflictDirection,
@@ -73,7 +82,9 @@ pub fn spawn_sftp_session(
 
     let rt = crate::runtime();
     rt.spawn(async move {
-        if let Err(e) = run_sftp_session(profile, password, key_passphrase, event_tx.clone(), cmd_rx).await {
+        if let Err(e) =
+            run_sftp_session(profile, password, key_passphrase, event_tx.clone(), cmd_rx).await
+        {
             let _ = event_tx.send(SftpEvent::Error(e.to_string())).await;
             let _ = event_tx.send(SftpEvent::Disconnected).await;
         }
@@ -120,54 +131,55 @@ async fn run_sftp_session(
     // Command loop
     while let Ok(cmd) = cmd_rx.recv().await {
         match cmd {
-            SftpCommand::ListDir(path) => {
-                match sftp.read_dir(&path).await {
-                    Ok(entries) => {
-                        let mut listing = Vec::new();
-                        for entry in entries {
-                            let name = entry.file_name();
-                            if name == "." || name == ".." {
-                                continue;
-                            }
-                            let metadata = entry.metadata();
-                            listing.push(SftpEntry {
-                                name,
-                                is_dir: metadata.is_dir(),
-                                size: metadata.size.unwrap_or(0),
-                                modified: metadata.mtime.map(|t| t as u64),
-                            });
+            SftpCommand::ListDir(path) => match sftp.read_dir(&path).await {
+                Ok(entries) => {
+                    let mut listing = Vec::new();
+                    for entry in entries {
+                        let name = entry.file_name();
+                        if name == "." || name == ".." {
+                            continue;
                         }
-                        listing.sort_by(|a, b| {
-                            b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                        let metadata = entry.metadata();
+                        listing.push(SftpEntry {
+                            name,
+                            is_dir: metadata.is_dir(),
+                            size: metadata.size.unwrap_or(0),
+                            modified: metadata.mtime.map(|t| t as u64),
                         });
-                        let _ = event_tx.send(SftpEvent::DirListing { path, entries: listing }).await;
                     }
-                    Err(e) => {
-                        let _ = event_tx.send(SftpEvent::Error(format!("Failed to list {path}: {e}"))).await;
-                    }
+                    listing.sort_by(|a, b| {
+                        b.is_dir
+                            .cmp(&a.is_dir)
+                            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    });
+                    let _ = event_tx
+                        .send(SftpEvent::DirListing {
+                            path,
+                            entries: listing,
+                        })
+                        .await;
                 }
-            }
+                Err(e) => {
+                    let _ = event_tx
+                        .send(SftpEvent::Error(format!("Failed to list {path}: {e}")))
+                        .await;
+                }
+            },
             SftpCommand::Upload { local, remote } => {
                 let mut conflict_policy = ConflictPolicy::default();
-                if let Err(msg) = upload_entry_recursive(
-                    &sftp,
-                    &event_tx,
-                    local,
-                    remote,
-                    &mut conflict_policy,
-                ).await {
+                if let Err(msg) =
+                    upload_entry_recursive(&sftp, &event_tx, local, remote, &mut conflict_policy)
+                        .await
+                {
                     let _ = event_tx.send(SftpEvent::Error(msg)).await;
                 }
             }
             SftpCommand::Download { remote, local } => {
                 let mut conflict_policy = ConflictPolicy::default();
-                if let Err(msg) = download_entry_recursive(
-                    &sftp,
-                    &event_tx,
-                    remote,
-                    local,
-                    &mut conflict_policy,
-                ).await {
+                if let Err(msg) =
+                    download_entry_recursive(&sftp, &event_tx, remote, local, &mut conflict_policy)
+                        .await
+                {
                     let _ = event_tx.send(SftpEvent::Error(msg)).await;
                 }
             }
@@ -183,9 +195,11 @@ async fn run_sftp_session(
             }
             SftpCommand::Rename { from, to } => {
                 if let Err(e) = sftp.rename(&from, &to).await {
-                    let _ = event_tx.send(SftpEvent::Error(
-                        format!("Failed to rename {from} -> {to}: {e}")
-                    )).await;
+                    let _ = event_tx
+                        .send(SftpEvent::Error(format!(
+                            "Failed to rename {from} -> {to}: {e}"
+                        )))
+                        .await;
                 }
             }
             SftpCommand::Disconnect => {
@@ -296,17 +310,17 @@ async fn ensure_remote_dir(sftp: &SftpSession, path: &str) -> Result<(), String>
                     continue;
                 }
 
-                sftp.remove_file(&current).await.map_err(|e| {
-                    format!("Failed to replace non-directory {current}: {e}")
-                })?;
-                sftp.create_dir(&current).await.map_err(|e| {
-                    format!("Failed to create directory {current}: {e}")
-                })?;
+                sftp.remove_file(&current)
+                    .await
+                    .map_err(|e| format!("Failed to replace non-directory {current}: {e}"))?;
+                sftp.create_dir(&current)
+                    .await
+                    .map_err(|e| format!("Failed to create directory {current}: {e}"))?;
             }
             Err(_) => {
-                sftp.create_dir(&current).await.map_err(|e| {
-                    format!("Failed to create directory {current}: {e}")
-                })?;
+                sftp.create_dir(&current)
+                    .await
+                    .map_err(|e| format!("Failed to create directory {current}: {e}"))?;
             }
         }
     }
@@ -348,11 +362,13 @@ async fn upload_file(
         .map_err(|e| format!("Failed to read local file {}: {e}", local_file.display()))?;
 
     let total = data.len() as u64;
-    let _ = event_tx.send(SftpEvent::TransferProgress {
-        name: display_name.clone(),
-        bytes: 0,
-        total,
-    }).await;
+    let _ = event_tx
+        .send(SftpEvent::TransferProgress {
+            name: display_name.clone(),
+            bytes: 0,
+            total,
+        })
+        .await;
 
     let mut file = sftp
         .open_with_flags(
@@ -371,20 +387,22 @@ async fn upload_file(
             .await
             .map_err(|e| format!("Upload failed for {display_name}: {e}"))?;
         written += chunk.len() as u64;
-        let _ = event_tx.send(SftpEvent::TransferProgress {
-            name: display_name.clone(),
-            bytes: written,
-            total,
-        }).await;
+        let _ = event_tx
+            .send(SftpEvent::TransferProgress {
+                name: display_name.clone(),
+                bytes: written,
+                total,
+            })
+            .await;
     }
 
     file.shutdown()
         .await
         .map_err(|e| format!("Finalizing upload failed for {display_name}: {e}"))?;
 
-    let _ = event_tx.send(SftpEvent::TransferComplete {
-        name: display_name,
-    }).await;
+    let _ = event_tx
+        .send(SftpEvent::TransferComplete { name: display_name })
+        .await;
 
     Ok(())
 }
@@ -424,21 +442,35 @@ async fn upload_entry_recursive(
 
         let mut stack = vec![local.clone()];
         while let Some(local_dir) = stack.pop() {
-            let dir_iter = std::fs::read_dir(&local_dir)
-                .map_err(|e| format!("Failed to read local directory {}: {e}", local_dir.display()))?;
+            let dir_iter = std::fs::read_dir(&local_dir).map_err(|e| {
+                format!(
+                    "Failed to read local directory {}: {e}",
+                    local_dir.display()
+                )
+            })?;
 
             for entry in dir_iter {
-                let entry = entry
-                    .map_err(|e| format!("Failed to read directory entry in {}: {e}", local_dir.display()))?;
+                let entry = entry.map_err(|e| {
+                    format!(
+                        "Failed to read directory entry in {}: {e}",
+                        local_dir.display()
+                    )
+                })?;
                 let local_entry = entry.path();
-                let relative = local_entry
-                    .strip_prefix(&local)
-                    .map_err(|e| format!("Failed to compute relative path for {}: {e}", local_entry.display()))?;
+                let relative = local_entry.strip_prefix(&local).map_err(|e| {
+                    format!(
+                        "Failed to compute relative path for {}: {e}",
+                        local_entry.display()
+                    )
+                })?;
                 let remote_entry = join_remote_with_relative(&remote, relative);
 
-                let file_type = entry
-                    .file_type()
-                    .map_err(|e| format!("Failed to inspect local entry {}: {e}", local_entry.display()))?;
+                let file_type = entry.file_type().map_err(|e| {
+                    format!(
+                        "Failed to inspect local entry {}: {e}",
+                        local_entry.display()
+                    )
+                })?;
 
                 if file_type.is_dir() {
                     if let Ok(existing) = sftp.metadata(&remote_entry).await {
@@ -462,20 +494,17 @@ async fn upload_entry_recursive(
                     ensure_remote_dir(sftp, &remote_entry).await?;
                     stack.push(local_entry);
                 } else if file_type.is_file() {
-                    upload_file(
-                        sftp,
-                        event_tx,
-                        &local_entry,
-                        &remote_entry,
-                        conflict_policy,
-                    ).await?;
+                    upload_file(sftp, event_tx, &local_entry, &remote_entry, conflict_policy)
+                        .await?;
                 }
             }
         }
 
-        let _ = event_tx.send(SftpEvent::TransferComplete {
-            name: remote_basename(&remote),
-        }).await;
+        let _ = event_tx
+            .send(SftpEvent::TransferComplete {
+                name: remote_basename(&remote),
+            })
+            .await;
 
         Ok(())
     } else {
@@ -543,11 +572,13 @@ async fn download_file_to_local(
         .and_then(|metadata| metadata.size)
         .unwrap_or(0);
 
-    let _ = event_tx.send(SftpEvent::TransferProgress {
-        name: display_name.clone(),
-        bytes: 0,
-        total,
-    }).await;
+    let _ = event_tx
+        .send(SftpEvent::TransferProgress {
+            name: display_name.clone(),
+            bytes: 0,
+            total,
+        })
+        .await;
 
     let mut remote_handle = sftp
         .open(remote_file)
@@ -570,15 +601,17 @@ async fn download_file_to_local(
         .await
         .map_err(|e| format!("Failed to write {}: {e}", local_file.display()))?;
 
-    let _ = event_tx.send(SftpEvent::TransferProgress {
-        name: display_name.clone(),
-        bytes: data.len() as u64,
-        total,
-    }).await;
+    let _ = event_tx
+        .send(SftpEvent::TransferProgress {
+            name: display_name.clone(),
+            bytes: data.len() as u64,
+            total,
+        })
+        .await;
 
-    let _ = event_tx.send(SftpEvent::TransferComplete {
-        name: display_name,
-    }).await;
+    let _ = event_tx
+        .send(SftpEvent::TransferComplete { name: display_name })
+        .await;
 
     Ok(())
 }
@@ -621,9 +654,12 @@ async fn download_entry_recursive(
             }
         }
 
-        tokio::fs::create_dir_all(&local_root)
-            .await
-            .map_err(|e| format!("Failed to create local directory {}: {e}", local_root.display()))?;
+        tokio::fs::create_dir_all(&local_root).await.map_err(|e| {
+            format!(
+                "Failed to create local directory {}: {e}",
+                local_root.display()
+            )
+        })?;
 
         let mut stack = vec![(remote.clone(), local_root.clone())];
         while let Some((remote_dir, local_dir)) = stack.pop() {
@@ -660,9 +696,12 @@ async fn download_entry_recursive(
                         }
                     }
 
-                    tokio::fs::create_dir_all(&local_child)
-                        .await
-                        .map_err(|e| format!("Failed to create local directory {}: {e}", local_child.display()))?;
+                    tokio::fs::create_dir_all(&local_child).await.map_err(|e| {
+                        format!(
+                            "Failed to create local directory {}: {e}",
+                            local_child.display()
+                        )
+                    })?;
                     stack.push((remote_child, local_child));
                 } else {
                     download_file_to_local(
@@ -671,14 +710,17 @@ async fn download_entry_recursive(
                         &remote_child,
                         &local_child,
                         conflict_policy,
-                    ).await?;
+                    )
+                    .await?;
                 }
             }
         }
 
-        let _ = event_tx.send(SftpEvent::TransferComplete {
-            name: remote_basename(&remote),
-        }).await;
+        let _ = event_tx
+            .send(SftpEvent::TransferComplete {
+                name: remote_basename(&remote),
+            })
+            .await;
 
         Ok(())
     } else {

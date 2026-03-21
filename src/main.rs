@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 #[allow(dead_code)]
 mod app;
 #[allow(dead_code)]
@@ -14,12 +16,11 @@ mod ssh;
 mod storage;
 mod ui;
 
-use gtk4 as gtk;
-use gtk::prelude::*;
-use libadwaita as adw;
 use std::sync::OnceLock;
 
 use app::SharedState;
+use slint::ComponentHandle;
+use ui::window::MainWindow;
 
 static TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -32,8 +33,31 @@ pub fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|panic_info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let message = format!("panic: {panic_info}\n\nbacktrace:\n{backtrace}\n");
+
+        eprintln!("{message}");
+
+        if let Some(path) = panic_log_path() {
+            let _ = std::fs::write(path, message);
+        }
+    }));
+}
+
+fn panic_log_path() -> Option<std::path::PathBuf> {
+    let path = config::config_dir().join("panic.log");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    Some(path)
+}
+
 fn main() {
     env_logger::init();
+    std::env::set_var("SLINT_STYLE", "fluent-dark");
+    install_panic_hook();
 
     if let Err(e) = config::ensure_directories() {
         eprintln!("Failed to create application directories: {e}");
@@ -43,20 +67,10 @@ fn main() {
     // Initialize the Tokio runtime eagerly
     let _ = runtime();
 
-    let app = adw::Application::builder()
-        .application_id("com.grustyssh.app")
-        .build();
+    let main_window = MainWindow::new().unwrap();
+    let state = SharedState::new();
 
-    app.connect_startup(|_| {
-        log::info!("GrustySSH starting up");
-        gtk::Window::set_default_icon_name("grustyssh");
-    });
+    ui::window::setup(&main_window, state);
 
-    app.connect_activate(move |app| {
-        let state = SharedState::new();
-        let window = ui::window::build_window(app, state);
-        window.present();
-    });
-
-    app.run();
+    main_window.run().unwrap();
 }

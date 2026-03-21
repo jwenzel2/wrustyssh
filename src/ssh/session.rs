@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use russh::client;
 use russh::{ChannelMsg, Disconnect};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
@@ -95,13 +95,27 @@ pub fn spawn_session(
     profile: ConnectionProfile,
     password: Option<Zeroizing<String>>,
     key_passphrase: Option<Zeroizing<String>>,
+    terminal_type: String,
+    initial_cols: u32,
+    initial_rows: u32,
     event_tx: async_channel::Sender<SshEvent>,
 ) -> async_channel::Sender<SshCommand> {
-    let (cmd_tx, cmd_rx) = async_channel::bounded::<SshCommand>(64);
+    let (cmd_tx, cmd_rx) = async_channel::bounded::<SshCommand>(256);
 
     let rt = crate::runtime();
     rt.spawn(async move {
-        if let Err(e) = run_session(profile, password, key_passphrase, event_tx.clone(), cmd_rx).await {
+        if let Err(e) = run_session(
+            profile,
+            password,
+            key_passphrase,
+            terminal_type,
+            initial_cols,
+            initial_rows,
+            event_tx.clone(),
+            cmd_rx,
+        )
+        .await
+        {
             let _ = event_tx.send(SshEvent::Error(e.to_string())).await;
             let _ = event_tx
                 .send(SshEvent::Disconnected(Some(e.to_string())))
@@ -116,6 +130,9 @@ async fn run_session(
     profile: ConnectionProfile,
     password: Option<Zeroizing<String>>,
     key_passphrase: Option<Zeroizing<String>>,
+    terminal_type: String,
+    initial_cols: u32,
+    initial_rows: u32,
     event_tx: async_channel::Sender<SshEvent>,
     cmd_rx: async_channel::Receiver<SshCommand>,
 ) -> Result<(), AppError> {
@@ -136,7 +153,15 @@ async fn run_session(
         .map_err(|e| AppError::Connection(e.to_string()))?;
 
     channel
-        .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
+        .request_pty(
+            false,
+            &terminal_type,
+            initial_cols.max(20),
+            initial_rows.max(5),
+            0,
+            0,
+            &[],
+        )
         .await
         .map_err(|e| AppError::Connection(e.to_string()))?;
 
@@ -147,8 +172,21 @@ async fn run_session(
 
     // Start enabled tunnels
     let session_handle = Arc::new(Mutex::new(session));
+    log::info!(
+        "Starting {} tunnels for profile '{}'",
+        profile.tunnels.len(),
+        profile.name
+    );
     for tc in &profile.tunnels {
         if tc.enabled {
+            log::info!(
+                "Starting tunnel '{}': {}:{} -> {}:{}",
+                tc.name,
+                tc.local_host,
+                tc.local_port,
+                tc.remote_host,
+                tc.remote_port
+            );
             tunnel::start_tunnel(session_handle.clone(), tc.clone(), event_tx.clone());
         }
     }
@@ -188,6 +226,9 @@ async fn run_session(
             msg = channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { data }) => {
+                        let _ = event_tx.send(SshEvent::Data(data.to_vec())).await;
+                    }
+                    Some(ChannelMsg::ExtendedData { data, .. }) => {
                         let _ = event_tx.send(SshEvent::Data(data.to_vec())).await;
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {

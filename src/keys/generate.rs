@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use ssh_key::private::{Ed25519Keypair, EcdsaKeypair, KeypairData};
+use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, KeypairData};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, LineEnding, PrivateKey};
 use uuid::Uuid;
 
@@ -125,9 +125,15 @@ pub fn import_keypair(
 fn map_algorithm(algo: Algorithm) -> KeyAlgorithm {
     match algo {
         Algorithm::Ed25519 => KeyAlgorithm::Ed25519,
-        Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 } => KeyAlgorithm::EcdsaNistP256,
-        Algorithm::Rsa { hash: Some(ssh_key::HashAlg::Sha256) } => KeyAlgorithm::RsaSha2_256,
-        Algorithm::Rsa { hash: Some(ssh_key::HashAlg::Sha512) } => KeyAlgorithm::RsaSha2_512,
+        Algorithm::Ecdsa {
+            curve: EcdsaCurve::NistP256,
+        } => KeyAlgorithm::EcdsaNistP256,
+        Algorithm::Rsa {
+            hash: Some(ssh_key::HashAlg::Sha256),
+        } => KeyAlgorithm::RsaSha2_256,
+        Algorithm::Rsa {
+            hash: Some(ssh_key::HashAlg::Sha512),
+        } => KeyAlgorithm::RsaSha2_512,
         Algorithm::Rsa { .. } => KeyAlgorithm::Rsa,
         _ => KeyAlgorithm::Ed25519, // fallback
     }

@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 
 use crate::config;
 use crate::error::AppError;
@@ -81,9 +82,11 @@ impl KeyStore {
         let pub_path = paths::public_key_path(id);
 
         std::fs::write(&priv_path, private_key_pem)?;
+        #[cfg(unix)]
         std::fs::set_permissions(&priv_path, std::fs::Permissions::from_mode(0o600))?;
 
         std::fs::write(&pub_path, public_key_openssh)?;
+        #[cfg(unix)]
         std::fs::set_permissions(&pub_path, std::fs::Permissions::from_mode(0o644))?;
 
         Ok(())
@@ -105,7 +108,10 @@ impl KeyStore {
                 public_key,
             });
         }
-        Ok(serde_json::to_string_pretty(&KeyBackup { version: 1, keys: entries })?)
+        Ok(serde_json::to_string_pretty(&KeyBackup {
+            version: 1,
+            keys: entries,
+        })?)
     }
 
     pub fn import_backup(&mut self, json: &str) -> Result<usize, AppError> {

@@ -42,27 +42,75 @@ pub fn keys_dir() -> PathBuf {
     data_dir().join("keys")
 }
 
+fn ensure_directory(path: PathBuf) -> Result<(), AppError> {
+    match std::fs::create_dir_all(&path) {
+        Ok(()) => {}
+        Err(err) if path.is_dir() => return Ok(()),
+        Err(err) => {
+            return Err(AppError::Config(format!(
+                "Failed to create directory '{}': {}",
+                path.display(),
+                err
+            )))
+        }
+    }
+
+    if path.is_dir() {
+        Ok(())
+    } else {
+        Err(AppError::Config(format!(
+            "Expected directory at '{}', but found a file",
+            path.display()
+        )))
+    }
+}
+
 pub fn ensure_directories() -> Result<(), AppError> {
-    std::fs::create_dir_all(config_dir())?;
-    std::fs::create_dir_all(keys_dir())?;
+    ensure_directory(config_dir())?;
+    ensure_directory(data_dir())?;
+    ensure_directory(keys_dir())?;
     Ok(())
 }
 
+pub const DEFAULT_FONT_FAMILY: &str = "Cascadia Mono";
+pub const DEFAULT_FONT_SIZE: u32 = 13;
+pub const DEFAULT_SCROLLBACK_LINES: i64 = 10000;
+pub const DEFAULT_TERMINAL_TYPE: &str = "xterm-256color";
+pub const DEFAULT_TERMINAL_COLOR_SCHEME: &str = "Campbell";
+pub const DEFAULT_APP_FONT_FAMILY: &str = "Segoe UI";
+pub const DEFAULT_APP_FONT_SIZE: u32 = 14;
+pub const DEFAULT_BUTTON_FONT_SIZE: u32 = 13;
+pub const DEFAULT_CONNECTION_NAME_FONT_SIZE: u32 = 16;
+pub const DEFAULT_CONNECTION_SUBTITLE_FONT_SIZE: u32 = 10;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub font_family: String,
     pub font_size: u32,
     pub scrollback_lines: i64,
     pub default_terminal_type: String,
+    pub terminal_color_scheme: String,
+    pub app_font_family: String,
+    pub app_font_size: u32,
+    pub button_font_size: u32,
+    pub connection_name_font_size: u32,
+    pub connection_subtitle_font_size: u32,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            font_family: "Monospace".into(),
-            font_size: 12,
-            scrollback_lines: 10000,
-            default_terminal_type: "xterm-256color".into(),
+            font_family: DEFAULT_FONT_FAMILY.into(),
+            font_size: DEFAULT_FONT_SIZE,
+            scrollback_lines: DEFAULT_SCROLLBACK_LINES,
+            default_terminal_type: DEFAULT_TERMINAL_TYPE.into(),
+            terminal_color_scheme: DEFAULT_TERMINAL_COLOR_SCHEME.into(),
+            app_font_family: DEFAULT_APP_FONT_FAMILY.into(),
+            app_font_size: DEFAULT_APP_FONT_SIZE,
+            button_font_size: DEFAULT_BUTTON_FONT_SIZE,
+            connection_name_font_size: DEFAULT_CONNECTION_NAME_FONT_SIZE,
+            connection_subtitle_font_size: DEFAULT_CONNECTION_SUBTITLE_FONT_SIZE,
         }
     }
 }

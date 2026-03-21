@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use russh::client;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -32,19 +32,39 @@ async fn run_tunnel(
     event_tx: async_channel::Sender<SshEvent>,
 ) -> Result<(), anyhow::Error> {
     let bind_addr = format!("{}:{}", config.local_host, config.local_port);
-    let listener = TcpListener::bind(&bind_addr).await?;
+    log::info!("Tunnel '{}': binding to {}", config.name, bind_addr);
+    let listener = TcpListener::bind(&bind_addr).await.map_err(|e| {
+        log::error!(
+            "Tunnel '{}': failed to bind {}: {}",
+            config.name,
+            bind_addr,
+            e
+        );
+        e
+    })?;
 
-    let _ = event_tx
-        .send(SshEvent::TunnelEstablished(config.id))
-        .await;
+    let _ = event_tx.send(SshEvent::TunnelEstablished(config.id)).await;
 
     let remote_host = config.remote_host.clone();
     let remote_port = config.remote_port as u32;
 
+    log::info!(
+        "Tunnel '{}': listening, forwarding to {}:{}",
+        config.name,
+        remote_host,
+        remote_port
+    );
+
     loop {
-        let (mut tcp_stream, _peer_addr) = listener.accept().await?;
+        let (mut tcp_stream, peer_addr) = listener.accept().await?;
+        log::info!(
+            "Tunnel '{}': accepted connection from {}",
+            config.name,
+            peer_addr
+        );
         let session = session.clone();
         let remote_host = remote_host.clone();
+        let tunnel_name = config.name.clone();
 
         tokio::spawn(async move {
             let sess = session.lock().await;
@@ -54,7 +74,10 @@ async fn run_tunnel(
             {
                 Ok(ch) => ch,
                 Err(e) => {
-                    log::error!("Failed to open direct-tcpip channel: {e}");
+                    log::error!(
+                        "Tunnel '{}': failed to open direct-tcpip channel: {e}",
+                        tunnel_name
+                    );
                     return;
                 }
             };

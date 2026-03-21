@@ -48,5 +48,4 @@ impl client::Handler for ClientHandler {
         // Auto-accept (TOFU model) - in production, check known_hosts
         Ok(true)
     }
-
 }
