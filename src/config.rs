@@ -9,7 +9,7 @@ static PROJECT_DIRS: OnceLock<ProjectDirs> = OnceLock::new();
 
 fn project_dirs() -> &'static ProjectDirs {
     PROJECT_DIRS.get_or_init(|| {
-        ProjectDirs::from("com", "grustyssh", "grustyssh")
+        ProjectDirs::from("com", "wrustyssh", "wrustyssh")
             .expect("Failed to determine project directories")
     })
 }

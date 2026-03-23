@@ -226,7 +226,7 @@ pub fn setup(ui: &MainWindow, state: SharedState) {
                 Ok(json) => {
                     let dialog = rfd::FileDialog::new()
                         .set_title("Save Connections Backup")
-                        .set_file_name("grustyssh-connections-backup.json")
+                        .set_file_name("wrustyssh-connections-backup.json")
                         .add_filter("JSON", &["json"]);
                     if let Some(path) = dialog.save_file() {
                         if let Err(e) = std::fs::write(&path, &json) {
@@ -2293,7 +2293,7 @@ fn show_key_manager(_ui: &MainWindow, state: &SharedState) {
                 Ok(json) => {
                     let file = rfd::FileDialog::new()
                         .set_title("Save Key Backup")
-                        .set_file_name("grustyssh-keys-backup.json")
+                        .set_file_name("wrustyssh-keys-backup.json")
                         .add_filter("JSON", &["json"])
                         .save_file();
                     if let Some(path) = file {

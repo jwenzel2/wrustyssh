@@ -1,10 +1,10 @@
 [Desktop Entry]
-Name=GrustySSH
+Name=wrustyssh
 Comment=A GTK4/libadwaita SSH client with tabbed terminals
-Exec=grustyssh
-Icon=grustyssh
+Exec=wrustyssh
+Icon=wrustyssh
 Terminal=false
 Type=Application
 Categories=Network;RemoteAccess;GTK;
 Keywords=ssh;terminal;remote;
-StartupWMClass=com.grustyssh.app
+StartupWMClass=com.wrustyssh.app
