@@ -1948,6 +1948,7 @@ fn show_connection_dialog(
         conn_dialog.set_hostname(profile.hostname.clone().into());
         conn_dialog.set_port(profile.port as i32);
         conn_dialog.set_username(profile.username.clone().into());
+        conn_dialog.set_use_cloudflare_tunnel(profile.use_cloudflare_tunnel);
         conn_dialog.set_auth_method_index(match profile.auth_method {
             AuthMethod::Password => 0,
             AuthMethod::PublicKey => 1,
@@ -2008,6 +2009,7 @@ fn show_connection_dialog(
                     dialog.get_hostname().as_str(),
                     dialog.get_port() as u16,
                     dialog.get_username().as_str(),
+                    dialog.get_use_cloudflare_tunnel(),
                     dialog.get_auth_method_index(),
                     &key_ids,
                     dialog.get_key_index(),

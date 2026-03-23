@@ -73,6 +73,8 @@ pub struct ConnectionProfile {
     pub username: String,
     pub auth_method: AuthMethod,
     pub key_pair_id: Option<Uuid>,
+    #[serde(default)]
+    pub use_cloudflare_tunnel: bool,
     pub tunnels: Vec<TunnelConfig>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -89,6 +91,7 @@ impl ConnectionProfile {
             username,
             auth_method: AuthMethod::Password,
             key_pair_id: None,
+            use_cloudflare_tunnel: false,
             tunnels: Vec::new(),
             created_at: now,
             updated_at: now,

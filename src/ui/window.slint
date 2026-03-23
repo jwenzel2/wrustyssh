@@ -495,6 +495,7 @@ export component ConnectionDialog inherits Dialog {
     in-out property <string> hostname: "";
     in-out property <int> port: 22;
     in-out property <string> username: "";
+    in-out property <bool> use-cloudflare-tunnel: false;
     in-out property <int> auth-method-index: 0;
     in-out property <[string]> auth-methods: ["Password", "Public Key", "Both"];
     in-out property <int> key-index: 0;
@@ -530,6 +531,10 @@ export component ConnectionDialog inherits Dialog {
             Row {
                 Text { text: "Username:"; vertical-alignment: center; }
                 LineEdit { text <=> root.username; }
+            }
+            Row {
+                Text { text: "Cloudflare Tunnel:"; vertical-alignment: center; }
+                Switch { checked <=> root.use-cloudflare-tunnel; }
             }
             Row {
                 Text { text: "Auth Method:"; vertical-alignment: center; }
