@@ -30,11 +30,23 @@ pub fn build_key_items(state: &SharedState) -> Vec<KeyItem> {
         .keys
         .iter()
         .enumerate()
-        .map(|(idx, k)| KeyItem {
-            id: k.id.to_string().into(),
-            name: k.name.clone().into(),
-            subtitle: format!("{} - {}", k.algorithm, k.public_key_fingerprint).into(),
-            index: idx as i32,
+        .map(|(idx, k)| {
+            let pub_preview = KeyStore::read_public_key(&k.id)
+                .map(|key_text| {
+                    let trimmed = key_text.trim();
+                    if trimmed.len() > 60 {
+                        format!("{}…", &trimmed[..60])
+                    } else {
+                        trimmed.to_string()
+                    }
+                })
+                .unwrap_or_else(|_| k.public_key_fingerprint.clone());
+            KeyItem {
+                id: k.id.to_string().into(),
+                name: k.name.clone().into(),
+                subtitle: format!("{} - {}", k.algorithm, pub_preview).into(),
+                index: idx as i32,
+            }
         })
         .collect()
 }

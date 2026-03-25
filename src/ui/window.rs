@@ -2264,8 +2264,13 @@ fn show_key_manager(_ui: &MainWindow, state: &SharedState) {
         dialog.on_copy_public_key(move |idx| {
             match dialogs::copy_public_key(&state, idx as usize) {
                 Ok(pub_key) => {
-                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                        let _ = clipboard.set_text(pub_key);
+                    match arboard::Clipboard::new() {
+                        Ok(mut clipboard) => {
+                            if let Err(e) = clipboard.set_text(pub_key) {
+                                log::error!("Failed to copy to clipboard: {e}");
+                            }
+                        }
+                        Err(e) => log::error!("Failed to open clipboard: {e}"),
                     }
                 }
                 Err(e) => log::error!("{}", e),
