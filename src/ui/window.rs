@@ -8,7 +8,7 @@ use slint::{ModelRc, VecModel};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::app::{SharedState, SshCommand, SshEvent};
+use crate::app::{HostKeyStatus, SharedState, SshCommand, SshEvent};
 use crate::config::Settings;
 use crate::models::connection::{AuthMethod, ConnectionProfile};
 use crate::models::tunnel::TunnelConfig;
@@ -1357,6 +1357,78 @@ where
     dialog.show().unwrap();
 }
 
+fn show_host_key_dialog(
+    hostname: &str,
+    key_type: &str,
+    fingerprint: &str,
+    status: &HostKeyStatus,
+    response_tx: async_channel::Sender<bool>,
+    pending_data: &Rc<RefCell<Vec<Vec<u8>>>>,
+) {
+    let is_warning = matches!(status, HostKeyStatus::Changed { .. });
+
+    let (title, body) = match status {
+        HostKeyStatus::New => (
+            "New Host Key".to_string(),
+            format!(
+                "The server at {hostname} presented a host key that is not in your known hosts.\n\n\
+                 Key type: {key_type}\n\
+                 Fingerprint: {fingerprint}\n\n\
+                 Do you want to trust this host and continue connecting?"
+            ),
+        ),
+        HostKeyStatus::Changed { old_fingerprint } => (
+            "HOST KEY CHANGED".to_string(),
+            format!(
+                "WARNING: The host key for {hostname} has CHANGED!\n\n\
+                 This could indicate a man-in-the-middle attack, or the server was reinstalled.\n\n\
+                 Key type: {key_type}\n\
+                 Old fingerprint: {old_fingerprint}\n\
+                 New fingerprint: {fingerprint}\n\n\
+                 Accepting will update your known hosts. Reject to abort the connection."
+            ),
+        ),
+    };
+
+    let dialog = HostKeyDialog::new().unwrap();
+    dialog.set_dialog_title(title.into());
+    dialog.set_dialog_body(body.into());
+    dialog.set_is_warning(is_warning);
+
+    let info_msg = format!(
+        "\r\n[Host key ({key_type}): {fingerprint}]\r\n"
+    );
+    pending_data.borrow_mut().push(info_msg.into_bytes());
+
+    let tx = response_tx.clone();
+    let dialog_weak = dialog.as_weak();
+    let pending = pending_data.clone();
+    dialog.on_accept_clicked(move || {
+        let _ = tx.send_blocking(true);
+        pending
+            .borrow_mut()
+            .push("\r\n[Host key accepted]\r\n".as_bytes().to_vec());
+        if let Some(d) = dialog_weak.upgrade() {
+            d.hide().ok();
+        }
+    });
+
+    let tx = response_tx;
+    let dialog_weak = dialog.as_weak();
+    let pending = pending_data.clone();
+    dialog.on_reject_clicked(move || {
+        let _ = tx.send_blocking(false);
+        pending
+            .borrow_mut()
+            .push("\r\n[Host key rejected — connection aborted]\r\n".as_bytes().to_vec());
+        if let Some(d) = dialog_weak.upgrade() {
+            d.hide().ok();
+        }
+    });
+
+    dialog.show().ok();
+}
+
 fn do_start_ssh_session(
     ui: &MainWindow,
     state: &SharedState,
@@ -1580,14 +1652,20 @@ fn do_start_ssh_session(
                     }
                 }
                 SshEvent::HostKeyVerify {
+                    hostname,
                     key_type,
                     fingerprint,
+                    status,
+                    response_tx,
                 } => {
-                    let msg = format!(
-                        "\r\n[Host key ({key_type}): {fingerprint}]\r\n\
-                         [Accepting host key automatically (TOFU)]\r\n"
+                    show_host_key_dialog(
+                        &hostname,
+                        &key_type,
+                        &fingerprint,
+                        &status,
+                        response_tx,
+                        &pending_data,
                     );
-                    pending_data.borrow_mut().push(msg.into_bytes());
                 }
                 SshEvent::TunnelEstablished(id) => {
                     let msg = format!("\r\n[Tunnel {} established]\r\n", id);
@@ -1633,14 +1711,20 @@ fn handle_non_data_event(
             pending_data.borrow_mut().push(err_msg.into_bytes());
         }
         SshEvent::HostKeyVerify {
+            hostname,
             key_type,
             fingerprint,
+            status,
+            response_tx,
         } => {
-            let msg = format!(
-                "\r\n[Host key ({key_type}): {fingerprint}]\r\n\
-                 [Accepting host key automatically (TOFU)]\r\n"
+            show_host_key_dialog(
+                &hostname,
+                &key_type,
+                &fingerprint,
+                &status,
+                response_tx,
+                pending_data,
             );
-            pending_data.borrow_mut().push(msg.into_bytes());
         }
         SshEvent::TunnelEstablished(id) => {
             let msg = format!("\r\n[Tunnel {} established]\r\n", id);
@@ -2291,55 +2375,105 @@ fn show_key_manager(_ui: &MainWindow, state: &SharedState) {
         });
     }
 
-    // Backup keys
+    // Backup keys (encrypted)
     {
         let state = state.clone();
         dialog.on_backup_clicked(move || {
-            let store = state.key_store.lock().unwrap();
-            match store.export_backup() {
-                Ok(json) => {
-                    let file = rfd::FileDialog::new()
-                        .set_title("Save Key Backup")
-                        .set_file_name("wrustyssh-keys-backup.json")
-                        .add_filter("JSON", &["json"])
-                        .save_file();
-                    if let Some(path) = file {
-                        if let Err(e) = std::fs::write(&path, &json) {
-                            log::error!("Failed to write backup: {e}");
+            let state = state.clone();
+            prompt_password_then("Set a passphrase to encrypt the backup", move |passphrase| {
+                let passphrase = match passphrase {
+                    Some(p) if !p.is_empty() => p,
+                    _ => {
+                        log::warn!("Key backup cancelled — passphrase required");
+                        return;
+                    }
+                };
+                let store = state.key_store.lock().unwrap();
+                match store.export_encrypted_backup(&passphrase) {
+                    Ok(data) => {
+                        let file = rfd::FileDialog::new()
+                            .set_title("Save Encrypted Key Backup")
+                            .set_file_name("wrustyssh-keys-backup.enc")
+                            .add_filter("Encrypted Backup", &["enc"])
+                            .save_file();
+                        if let Some(path) = file {
+                            if let Err(e) = std::fs::write(&path, &data) {
+                                log::error!("Failed to write backup: {e}");
+                            }
                         }
                     }
+                    Err(e) => log::error!("Failed to export keys: {e}"),
                 }
-                Err(e) => log::error!("Failed to export keys: {e}"),
-            }
+            });
         });
     }
 
-    // Restore keys
+    // Restore keys (encrypted)
     {
         let state = state.clone();
         let dialog_handle = dialog.as_weak();
         dialog.on_restore_clicked(move || {
             let file = rfd::FileDialog::new()
-                .set_title("Restore Keys from Backup")
-                .add_filter("JSON", &["json"])
+                .set_title("Restore Keys from Encrypted Backup")
+                .add_filter("Encrypted Backup", &["enc"])
+                .add_filter("Legacy JSON", &["json"])
                 .pick_file();
             if let Some(path) = file {
-                match std::fs::read_to_string(&path) {
-                    Ok(json) => {
-                        let mut store = state.key_store.lock().unwrap();
-                        match store.import_backup(&json) {
-                            Ok(count) => {
-                                log::info!("Imported {count} key(s).");
-                                drop(store);
-                                if let Some(d) = dialog_handle.upgrade() {
-                                    let items = dialogs::build_key_items(&state);
-                                    d.set_stored_keys(ModelRc::new(VecModel::from(items)));
+                let state = state.clone();
+                let dialog_handle = dialog_handle.clone();
+                let is_legacy = path.extension().map(|e| e == "json").unwrap_or(false);
+
+                if is_legacy {
+                    // Support importing old unencrypted backups
+                    match std::fs::read_to_string(&path) {
+                        Ok(json) => {
+                            let mut store = state.key_store.lock().unwrap();
+                            match store.import_backup(&json) {
+                                Ok(count) => {
+                                    log::info!("Imported {count} key(s) from legacy backup.");
+                                    drop(store);
+                                    if let Some(d) = dialog_handle.upgrade() {
+                                        let items = dialogs::build_key_items(&state);
+                                        d.set_stored_keys(ModelRc::new(VecModel::from(items)));
+                                    }
                                 }
+                                Err(e) => log::error!("Failed to import backup: {e}"),
                             }
-                            Err(e) => log::error!("Failed to import backup: {e}"),
                         }
+                        Err(e) => log::error!("Failed to read backup file: {e}"),
                     }
-                    Err(e) => log::error!("Failed to read backup file: {e}"),
+                } else {
+                    prompt_password_then(
+                        "Enter the backup passphrase",
+                        move |passphrase| {
+                            let passphrase = match passphrase {
+                                Some(p) if !p.is_empty() => p,
+                                _ => {
+                                    log::warn!("Key restore cancelled — passphrase required");
+                                    return;
+                                }
+                            };
+                            match std::fs::read(&path) {
+                                Ok(data) => {
+                                    let mut store = state.key_store.lock().unwrap();
+                                    match store.import_encrypted_backup(&data, &passphrase) {
+                                        Ok(count) => {
+                                            log::info!("Imported {count} key(s).");
+                                            drop(store);
+                                            if let Some(d) = dialog_handle.upgrade() {
+                                                let items = dialogs::build_key_items(&state);
+                                                d.set_stored_keys(ModelRc::new(VecModel::from(
+                                                    items,
+                                                )));
+                                            }
+                                        }
+                                        Err(e) => log::error!("Failed to import backup: {e}"),
+                                    }
+                                }
+                                Err(e) => log::error!("Failed to read backup file: {e}"),
+                            }
+                        },
+                    );
                 }
             }
         });

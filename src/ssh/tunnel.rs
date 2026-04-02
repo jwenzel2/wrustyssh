@@ -1,4 +1,5 @@
 use russh::client;
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -32,6 +33,18 @@ async fn run_tunnel(
     event_tx: async_channel::Sender<SshEvent>,
 ) -> Result<(), anyhow::Error> {
     let bind_addr = format!("{}:{}", config.local_host, config.local_port);
+
+    // Warn if binding to a non-loopback address, which exposes the tunnel to the network
+    if let Ok(ip) = config.local_host.parse::<IpAddr>() {
+        if !ip.is_loopback() {
+            log::warn!(
+                "Tunnel '{}': binding to non-loopback address {} — this exposes the tunnel to the network!",
+                config.name,
+                config.local_host
+            );
+        }
+    }
+
     log::info!("Tunnel '{}': binding to {}", config.name, bind_addr);
     let listener = TcpListener::bind(&bind_addr).await.map_err(|e| {
         log::error!(

@@ -186,7 +186,8 @@ async fn run_sftp_session(
                 }
             }
             SftpCommand::MkDir(path) => {
-                if let Err(msg) = ensure_remote_dir(&sftp, &path).await {
+                let mut conflict_policy = ConflictPolicy::default();
+                if let Err(msg) = ensure_remote_dir(&sftp, &path, &event_tx, &mut conflict_policy).await {
                     let _ = event_tx.send(SftpEvent::Error(msg)).await;
                 }
             }
@@ -289,7 +290,12 @@ async fn ask_transfer_conflict(
         })
 }
 
-async fn ensure_remote_dir(sftp: &SftpSession, path: &str) -> Result<(), String> {
+async fn ensure_remote_dir(
+    sftp: &SftpSession,
+    path: &str,
+    event_tx: &async_channel::Sender<SftpEvent>,
+    conflict_policy: &mut ConflictPolicy,
+) -> Result<(), String> {
     let normalized = path.trim_end_matches('/');
     if normalized.is_empty() || normalized == "." || normalized == "/" {
         return Ok(());
@@ -312,9 +318,28 @@ async fn ensure_remote_dir(sftp: &SftpSession, path: &str) -> Result<(), String>
                     continue;
                 }
 
-                sftp.remove_file(&current)
-                    .await
-                    .map_err(|e| format!("Failed to replace non-directory {current}: {e}"))?;
+                // A file exists where we need a directory — ask the user
+                match ask_transfer_conflict(
+                    event_tx,
+                    &current,
+                    SftpConflictDirection::Upload,
+                    false,
+                    conflict_policy,
+                )
+                .await?
+                {
+                    SftpConflictDecision::KeepExisting => {
+                        return Err(format!(
+                            "Cannot create directory {current}: file exists and was kept"
+                        ));
+                    }
+                    SftpConflictDecision::ReplaceWithIncoming => {
+                        sftp.remove_file(&current)
+                            .await
+                            .map_err(|e| format!("Failed to replace non-directory {current}: {e}"))?;
+                    }
+                }
+
                 sftp.create_dir(&current)
                     .await
                     .map_err(|e| format!("Failed to create directory {current}: {e}"))?;
@@ -440,7 +465,7 @@ async fn upload_entry_recursive(
             }
         }
 
-        ensure_remote_dir(sftp, &remote).await?;
+        ensure_remote_dir(sftp, &remote, event_tx, conflict_policy).await?;
 
         let mut stack = vec![local.clone()];
         while let Some(local_dir) = stack.pop() {
@@ -474,6 +499,14 @@ async fn upload_entry_recursive(
                     )
                 })?;
 
+                if file_type.is_symlink() {
+                    log::info!(
+                        "Skipping symlink during upload: {}",
+                        local_entry.display()
+                    );
+                    continue;
+                }
+
                 if file_type.is_dir() {
                     if let Ok(existing) = sftp.metadata(&remote_entry).await {
                         if !existing.is_dir() {
@@ -493,7 +526,7 @@ async fn upload_entry_recursive(
                             }
                         }
                     }
-                    ensure_remote_dir(sftp, &remote_entry).await?;
+                    ensure_remote_dir(sftp, &remote_entry, event_tx, conflict_policy).await?;
                     stack.push(local_entry);
                 } else if file_type.is_file() {
                     upload_file(sftp, event_tx, &local_entry, &remote_entry, conflict_policy)

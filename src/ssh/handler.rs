@@ -1,23 +1,32 @@
 use async_trait::async_trait;
 use russh::client;
 use russh::keys::key::PublicKey;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
-use crate::app::SshEvent;
+use crate::app::{HostKeyStatus, SshEvent};
+use crate::ssh::known_hosts;
 
 pub struct ClientHandler {
     pub event_tx: async_channel::Sender<SshEvent>,
-    pub host_key_accepted: Arc<Mutex<Option<bool>>>,
-    pub host_key_notify: Arc<tokio::sync::Notify>,
+    /// "hostname:port" used for known_hosts lookups.
+    pub host_id: String,
+    /// Hostname (without port) for display and known_hosts storage.
+    pub hostname: String,
+    /// Port number for known_hosts storage.
+    pub port: u16,
 }
 
 impl ClientHandler {
-    pub fn new(event_tx: async_channel::Sender<SshEvent>) -> Self {
+    pub fn new(
+        event_tx: async_channel::Sender<SshEvent>,
+        hostname: String,
+        port: u16,
+    ) -> Self {
+        let host_id = known_hosts::KnownHosts::host_key(&hostname, port);
         Self {
             event_tx,
-            host_key_accepted: Arc::new(Mutex::new(None)),
-            host_key_notify: Arc::new(tokio::sync::Notify::new()),
+            host_id,
+            hostname,
+            port,
         }
     }
 }
@@ -37,15 +46,52 @@ impl client::Handler for ClientHandler {
             PublicKey::EC { ref key } => key.ident(),
         };
 
-        let _ = self
-            .event_tx
-            .send(SshEvent::HostKeyVerify {
-                key_type: key_type.to_string(),
-                fingerprint: fingerprint.clone(),
-            })
-            .await;
+        // Check known_hosts first
+        match known_hosts::check(&self.hostname, self.port, key_type, &fingerprint) {
+            known_hosts::CheckResult::Match => {
+                // Known host, fingerprint matches — accept silently
+                return Ok(true);
+            }
+            known_hosts::CheckResult::New => {
+                // New host — ask the user (TOFU)
+                let (response_tx, response_rx) = async_channel::bounded(1);
+                let _ = self
+                    .event_tx
+                    .send(SshEvent::HostKeyVerify {
+                        hostname: self.host_id.clone(),
+                        key_type: key_type.to_string(),
+                        fingerprint: fingerprint.clone(),
+                        status: HostKeyStatus::New,
+                        response_tx,
+                    })
+                    .await;
 
-        // Auto-accept (TOFU model) - in production, check known_hosts
-        Ok(true)
+                let accepted = response_rx.recv().await.unwrap_or(false);
+                if accepted {
+                    known_hosts::accept(&self.hostname, self.port, key_type, &fingerprint);
+                }
+                Ok(accepted)
+            }
+            known_hosts::CheckResult::Changed { old_fingerprint } => {
+                // Fingerprint mismatch — warn the user strongly
+                let (response_tx, response_rx) = async_channel::bounded(1);
+                let _ = self
+                    .event_tx
+                    .send(SshEvent::HostKeyVerify {
+                        hostname: self.host_id.clone(),
+                        key_type: key_type.to_string(),
+                        fingerprint: fingerprint.clone(),
+                        status: HostKeyStatus::Changed { old_fingerprint },
+                        response_tx,
+                    })
+                    .await;
+
+                let accepted = response_rx.recv().await.unwrap_or(false);
+                if accepted {
+                    known_hosts::accept(&self.hostname, self.port, key_type, &fingerprint);
+                }
+                Ok(accepted)
+            }
+        }
     }
 }

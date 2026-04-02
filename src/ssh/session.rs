@@ -68,7 +68,11 @@ pub async fn establish_session(
         ..Default::default()
     });
 
-    let handler = ClientHandler::new(event_tx.clone());
+    let handler = ClientHandler::new(
+        event_tx.clone(),
+        profile.hostname.clone(),
+        profile.port,
+    );
 
     let (mut session, cloudflared) = if profile.use_cloudflare_tunnel {
         let (stream, child) = connect_via_cloudflare_tunnel(profile)?;

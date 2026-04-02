@@ -54,10 +54,20 @@ fn panic_log_path() -> Option<std::path::PathBuf> {
     Some(path)
 }
 
+/// Remove any leftover panic.log from a previous run to limit exposure of
+/// sensitive data that may have been captured in stack traces.
+fn wipe_panic_log() {
+    if let Some(path) = panic_log_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 fn main() {
     env_logger::init();
-    std::env::set_var("SLINT_STYLE", "fluent-dark");
+    // SAFETY: Called before any threads are spawned, so no data race is possible.
+    unsafe { std::env::set_var("SLINT_STYLE", "fluent-dark") };
     install_panic_hook();
+    wipe_panic_log();
 
     if let Err(e) = config::ensure_directories() {
         eprintln!("Failed to create application directories: {e}");

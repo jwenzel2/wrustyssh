@@ -3,6 +3,7 @@ use std::path::Path;
 use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, KeypairData};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, LineEnding, PrivateKey};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::error::AppError;
 use crate::keys::storage::KeyStore;
@@ -48,9 +49,10 @@ pub fn generate_keypair(
     let public_key = private_key.public_key();
     let fingerprint = public_key.fingerprint(HashAlg::Sha256).to_string();
 
-    let private_pem = private_key
+    let private_pem: Zeroizing<String> = private_key
         .to_openssh(LineEnding::LF)
-        .map_err(|e| AppError::KeyGen(e.to_string()))?;
+        .map_err(|e| AppError::KeyGen(e.to_string()))?
+        .into();
     let public_openssh = public_key
         .to_openssh()
         .map_err(|e| AppError::KeyGen(e.to_string()))?;
@@ -81,7 +83,7 @@ pub fn import_keypair(
     private_key_path: &Path,
     public_key_path: &Path,
 ) -> Result<KeyPairMeta, AppError> {
-    let private_key_data = std::fs::read_to_string(private_key_path)?;
+    let private_key_data = Zeroizing::new(std::fs::read_to_string(private_key_path)?);
     let public_key_data = std::fs::read_to_string(public_key_path)?;
 
     // Try to parse the private key without a passphrase to detect algorithm

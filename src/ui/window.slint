@@ -975,6 +975,76 @@ export component PreferencesDialog inherits Dialog {
     }
 }
 
+// ─── Host Key Verification Dialog ────────────────────────
+
+export component HostKeyDialog inherits Dialog {
+    title: "Host Key Verification";
+    preferred-width: 520px;
+    preferred-height: 320px;
+
+    in-out property <string> dialog-title: "New Host Key";
+    in-out property <string> dialog-body: "";
+    in-out property <bool> is-warning: false;
+
+    callback accept-clicked();
+    callback reject-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalBox {
+            spacing: 8px;
+            Text {
+                text: root.is-warning ? "\u{26A0}" : "\u{1F511}";
+                font-size: 24px;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.dialog-title;
+                font-size: 18px;
+                font-weight: 700;
+                color: root.is-warning ? #ff4444 : Palette.foreground;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: root.dialog-body;
+            wrap: word-wrap;
+            font-size: 12px;
+        }
+
+        VerticalLayout { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button {
+                text: "Reject";
+                clicked => { root.reject-clicked(); }
+            }
+            Rectangle {
+                width: accept-btn.preferred-width + 24px;
+                height: accept-btn.preferred-height + 8px;
+                border-radius: 4px;
+                background: root.is-warning ? #cc3333 : #338833;
+
+                accept-btn := Text {
+                    text: root.is-warning ? "Accept Anyway" : "Accept";
+                    color: #ffffff;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea {
+                    clicked => { root.accept-clicked(); }
+                }
+            }
+        }
+    }
+}
+
 // ─── Conflict Dialog ─────────────────────────────────────
 
 export component ConflictDialog inherits Dialog {

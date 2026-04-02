@@ -17,7 +17,16 @@ pub enum SshCommand {
     Disconnect,
 }
 
-/// Events sent from Tokio SSH task to GTK UI thread
+/// Result of host-key lookup against the known_hosts file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostKeyStatus {
+    /// First time seeing this host — no entry in known_hosts.
+    New,
+    /// The host exists in known_hosts but the fingerprint changed.
+    Changed { old_fingerprint: String },
+}
+
+/// Events sent from Tokio SSH task to UI thread
 #[derive(Debug, Clone)]
 pub enum SshEvent {
     Connected,
@@ -27,8 +36,12 @@ pub enum SshEvent {
     Disconnected(Option<String>),
     Error(String),
     HostKeyVerify {
+        hostname: String,
         key_type: String,
         fingerprint: String,
+        status: HostKeyStatus,
+        /// Send `true` to accept, `false` to reject.
+        response_tx: async_channel::Sender<bool>,
     },
 }
 
